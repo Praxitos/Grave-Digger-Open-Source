@@ -1,9 +1,9 @@
-local variables_folder = game:GetService("ReplicatedStorage").Values.Variables
-local notifications_module = require(game:GetService("ReplicatedStorage").Libraries.Shared.Notifications)
+local variables_folder = game:GetService("ReplicatedStorage").Shared.Library.Configuration
+--local notifications_module = require(game:GetService("ReplicatedStorage").Libraries.Shared.Notifications)
 
 local function push_variable_func(player, key, value)
 	for _, targetplayer in pairs(game.Players:GetPlayers()) do
-		notifications_module.create_variable_notification(targetplayer, player.Name,key, value)
+		--notifications_module.create_variable_notification(targetplayer, player.Name,key, value)
 	end
 end
 
@@ -38,12 +38,13 @@ local function convert_value(targetType, str)
 	end
 end
 
+
 return function(context, instance, var1, var2)
 	if not instance then
 		return "Instance '"..instance.Name .."' not found."
 	end
 
-	if not instance:FindFirstChild(var1) and not instance:IsA("ValueBase") then
+	if not instance:FindFirst(var1) and not instance:IsA("ValueBase") then
 		-- If the property is not a child value, check if it exists as a property
 		if instance[var1] == nil then
 			return "Property '"..var1.."' not found on instance '"..instance.Name.."'."
