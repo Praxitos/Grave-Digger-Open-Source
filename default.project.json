@@ -2,70 +2,83 @@
   "name": "-G-D-R-Development-Repository",
   "tree": {
     "$className": "DataModel",
-
+    "Lighting": {
+      "$properties": {
+        "Ambient": [0, 0, 0],
+        "Brightness": 2,
+        "Technology": "Voxel",
+        "Outlines": false,
+        "GlobalShadows": true
+      }
+    },
     "ReplicatedStorage": {
       "Shared": {
         "$path": "src/shared"
       }
     },
-
     "ServerScriptService": {
+      "Script": {
+        "$className": "Script",
+        "$properties": {
+          "Source": "print(\"Hello world!\")\n"
+        }
+      },
       "Server": {
         "$path": "src/server"
-      }
-    },
-
-    "StarterPlayer": {
-      "StarterPlayerScripts": {
-        "Client": {
-          "$path": "src/client"
-        }
-      }
-    },
-
-    "Workspace": {
-      "$properties": {
-        "FilteringEnabled": true
-      },
-      "Baseplate": {
-        "$className": "Part",
-        "$properties": {
-          "Anchored": true,
-          "Color": [
-            0.38823,
-            0.37254,
-            0.38823
-          ],
-          "Locked": true,
-          "Position": [
-            0,
-            -10,
-            0
-          ],
-          "Size": [
-            512,
-            20,
-            512
-          ]
-        }
-      }
-    },
-    "Lighting": {
-      "$properties": {
-        "Ambient": [
-          0,
-          0,
-          0
-        ],
-        "Brightness": 2,
-        "GlobalShadows": true,
-        "Outlines": false,
-        "Technology": "Voxel"
       }
     },
     "SoundService": {
       "$properties": {
         "RespectFilteringEnabled": true
+      }
+    },
+    "StarterPlayer": {
+      "StarterPlayerScripts": {
+        "Client": {
+          "$path": "src/client"
+        },
+        "Starter": {
+          "$className": "LocalScript",
+          "$properties": {
+            "Source": "local function setupcmdr()\n\tlocal replicatedstorage_service = game:GetService(\"ReplicatedStorage\")\n\tlocal Cmdr = require(replicatedstorage_service:WaitForChild(\"CmdrClient\"))\n\n\tCmdr:SetActivationKeys({ Enum.KeyCode.F2 })\nend\n\nsetupcmdr()"
+          }
+        }
+      }
+    },
+    "Workspace": {
+      "Baseplate": {
+        "$className": "Part",
+        "$properties": {
+          "Color": [0.3882, 0.3725, 0.3882],
+          "Locked": true,
+          "Anchored": true,
+          "Position": [0, -10, 0],
+          "Size": [512, 20, 512]
+        }
+      },
+      "Grave/Digger Public Resources V15.5": {
+        "$className": "Model",
+        "Buildings": {
+          "$className": "Folder",
+          "Traps": {
+            "$className": "Folder",
+            "TRIPWIRE TUTORIAL": {
+              "$className": "Script",
+              "$properties": {
+                "Source": "--[[\n\nIf you want to set up your own tripwires:\n\t\n\t1. Look for the fuse_hook parts in the trap and tripwire object.\n\t2. Copy the tripwire Beam to either one of the fuse_hook parts.\n\t3. On the new Beam, find the Shape category and look for Attachment0 and Attachment1.\n\t4. Set Attachment0 and Attachment1 of the Beam to the 2 attachments in the fuse_hook parts.\n\t\nIf done correctly, you should see the barbed wire trail between the tripwire and the trap.\n\t\n--]]"
+              }
+            }
+          }
+        },
+        "READ ME": {
+          "$className": "Script",
+          "$properties": {
+            "Source": "--[[\n\nPUTTING ON ACCESSORIES:\n1. copy position of the limb you want to attach to\n2. paste into the accessory model's position\n\nIf you animate, you can weld the primarypart of the accessory to the body part you want to attach it to\n\n\nTIPS FOR MAKING YOUR OWN TERRAIN:\n\nPart to Terrain is a good plugin for getting the basic shape, and then doing manual corrections w/ terrain tools\nPlugin here: https://create.roblox.com/store/asset/261634767/Part-to-Terrain\n\nUse Rock for diggable terrain, and Basalt for undiggable areas\n\n\nFOR ANIMATORS OR PEOPLE WHO USE ANIMATING TOOLS TO POSE:\n\nEach soldier has 2 welds for tools: one Motor6D connecting it to their arm, and one regular weld connecting it to their torso.\nIf you want the tool to move with their arms, you must disable the torso weld.\nYou also have to disable the Motor6D on their arm if you don't want the tool to move with their arm.\n\nIf this does not suit your workflow, feel free to change the welds in a way that you're most comfortable with.\n\n\nContact valkyriecraby on discord if there are errors in the public resources that need to be fixed\n\n--]]"
+          }
+        }
+      },
+      "$properties": {
+        "FilteringEnabled": true
       }
     }
   }

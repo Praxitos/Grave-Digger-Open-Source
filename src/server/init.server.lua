@@ -1,12 +1,19 @@
-local player_service    = game:GetService("Players")
-local replicated_storage = game:GetService("ReplicatedStorage")
+------------------
+-- // Praxitos
+-- // Primary Server Setup Handler
+------------------
 
--- // Primary Testing
-player_service.PlayerAdded:Connect(function(player)
-    print(player.Name)
-end)
+-- // Variable References
+local replicatedstorage_service     = game:GetService("ReplicatedStorage")
+local modules_folder                = replicatedstorage_service.Shared.Modules
+
+-- module to startup/run
+local commandservice_module         = require(modules_folder.CommandService)
+local dataservice_module            = require(modules_folder.DataService)
 
 
--- // startup test
-local modules_folder = replicated_storage.Shared.Modules.TrueHello
-require(modules_folder)
+-- start modules
+commandservice_module.start_module()
+dataservice_module.start_module()
+
+
