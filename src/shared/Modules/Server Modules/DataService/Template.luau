@@ -7,6 +7,10 @@ return {
 		["Miscellanous Options"] = {
 
 		},
+
+		["Input Options"] = {
+			["Free Look"] = "Enum.KeyCode.LeftAlt",
+		}
 	},
 
 	["PlayerData"] = {

@@ -7,11 +7,12 @@
 local replicatedstorage_service     = game:GetService("ReplicatedStorage")
 local modules_folder                = replicatedstorage_service.Shared.Modules
 
--- module to startup/run
-local commandservice_module         = require(modules_folder.CommandService)
-local dataservice_module            = require(modules_folder.DataService)
+-- // Functions
 
-
--- start modules
-commandservice_module.start_module()
-dataservice_module.start_module()
+-- Starts all the Modules
+for _, child in pairs(modules_folder["Server Modules"]:GetChildren()) do
+    local required_child = require(child)
+    if required_child.start_module then
+        required_child.start_module()
+    end
+end
