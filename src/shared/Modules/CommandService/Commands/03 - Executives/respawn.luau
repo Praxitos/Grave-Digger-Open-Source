@@ -1,7 +1,7 @@
 return {
 	Name = "respawn";
 	Description = "Respawns a player or a group of players.";
-	Group = "10";
+	Group = "3";
 	Args = {
 		{
 			Type = "players";

@@ -1,8 +1,7 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Util = require(script.Parent.Parent.Shared.Util)
 
-local ValuesFolder = ReplicatedStorage:WaitForChild("Values")
-local VariablesFolder = ValuesFolder:WaitForChild("Variables")
+local VariablesFolder = ReplicatedStorage.Shared.Library.Configuration
 
 -- Collect all ValueBase descendants
 local function getVariables()

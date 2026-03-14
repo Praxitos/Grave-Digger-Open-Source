@@ -15,5 +15,3 @@ local dataservice_module            = require(modules_folder.DataService)
 -- start modules
 commandservice_module.start_module()
 dataservice_module.start_module()
-
-

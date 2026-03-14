@@ -2,7 +2,7 @@ return {
 	Name = "setVariable";
 	Aliases = {""};
 	Description = "Sets a specific game variable.";
-	Group = "8";
+	Group = "3";
 	Args = {
 		{
 			Type = "variable";

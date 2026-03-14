@@ -2,7 +2,7 @@ return {
 	Name = "thru";
 	Aliases = {"t", "through"};
 	Description = "Teleports you through whatever your mouse is hovering over, placing you equidistantly from the wall.";
-	Group = "4";
+	Group = "1";
 	Args = {
 		{
 			Type = "number";

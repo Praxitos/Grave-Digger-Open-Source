@@ -2,7 +2,7 @@ return {
 	Name = "kill";
 	Aliases = {"slay"};
 	Description = "Kills a player or set of players.";
-	Group = "10";
+	Group = "3";
 	Args = {
 		{
 			Type = "players";

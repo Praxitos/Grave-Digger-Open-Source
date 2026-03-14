@@ -2,7 +2,7 @@ return {
 	Name = "datastore";
 	Aliases = {""};
 	Description = "Returns the table of the specific keyed within the datastore.";
-	Group = "9";
+	Group = "2";
 	Args = {
 		{
 			Type = "string";

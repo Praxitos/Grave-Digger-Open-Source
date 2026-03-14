@@ -2,7 +2,7 @@ return {
 	Name = "wipedata";
 	Aliases = {""};
 	Description = "Wipes data, or specific category.";
-	Group = "9";
+	Group = "2";
 	Args = {
 		{
 			Type = "players";

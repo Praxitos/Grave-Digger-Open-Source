@@ -8,4 +8,8 @@ return {
 
 		},
 	},
+
+	["PlayerData"] = {
+		["CMDRLevel"] = 5,
+	},
 }

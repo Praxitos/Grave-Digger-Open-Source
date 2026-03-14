@@ -2,7 +2,7 @@ return {
 	Name = "blink";
 	Aliases = {"b"};
 	Description = "Teleports you to where your mouse is hovering.";
-	Group = "4";
+	Group = "1";
 	Args = {};
 
 	ClientRun = function(context)
