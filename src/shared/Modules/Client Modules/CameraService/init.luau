@@ -37,14 +37,11 @@ end
 
 -- starter module
 function module.start_module()
-    if game:GetService("RunService"):IsServer() then
-        return
-    end
-
-
     check_cameras()
 
     workspace.CurrentCamera.CameraType = Enum.CameraType.Scriptable
+
+    module.switch_camera("BaseCamera")
 end
 
 -- switch camera module
