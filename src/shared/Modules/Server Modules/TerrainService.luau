@@ -1,28 +1,25 @@
+--!strict
 local module = {}
 
--- // services
-local terrain_service = workspace.Terrain
+local terrain = workspace.Terrain
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
--- // variables
-local terrain_count = 0
+-- Config
+local max_chunks = 200
+local chunk_size = 32
+local max_dimension = 320
 
--- blacklisted positions (no rock)
 local blacklists = {
 	[Vector3.new(0,0,0)] = true
 }
 
--- // flood map with terrain chunks
 local function flood_map_with_parts()
 	local terrain_folder = Instance.new("Folder")
 	terrain_folder.Name = "TerrainChunks"
 	terrain_folder.Parent = workspace
 
 	local terrain_count = 0
-	local max_chunks = 200
-	local chunk_size = 32
-	local max_dimension = 320
 
-	-- function to create a part reference
 	local function create_part_reference(position)
 		local terrain_chunk = Instance.new("Part")
 		terrain_chunk.Name = "TerrainChunk" .. terrain_count
@@ -35,7 +32,6 @@ local function flood_map_with_parts()
 		return terrain_chunk
 	end
 
-	-- queue-based expansion for volumetric spread
 	local directions = {
 		Vector3.new( 1, 0, 0),
 		Vector3.new(-1, 0, 0),
@@ -51,7 +47,6 @@ local function flood_map_with_parts()
 	while terrain_count < max_chunks and #queue > 0 do
 		local pos = table.remove(queue, 1)
 
-		-- check boundaries
 		if math.abs(pos.X) > max_dimension or math.abs(pos.Y) > max_dimension or math.abs(pos.Z) > max_dimension then
 			continue
 		end
@@ -60,11 +55,9 @@ local function flood_map_with_parts()
 		if visited[key] then continue end
 		visited[key] = true
 
-		-- create the chunk
 		create_part_reference(pos)
-		terrain_count = terrain_count + 1
+		terrain_count += 1
 
-		-- enqueue neighbors
 		for _, dir in ipairs(directions) do
 			local neighbor = pos + dir * chunk_size
 			table.insert(queue, neighbor)
@@ -72,13 +65,12 @@ local function flood_map_with_parts()
 	end
 end
 
--- // fill chunks with rock, respect blacklist
 local function fill_parts_with_rock()
 	local terrain_chunks_folder = workspace:WaitForChild("TerrainChunks")
-	for _, child in pairs(terrain_chunks_folder:GetChildren()) do
+	for _, child in ipairs(terrain_chunks_folder:GetChildren()) do
 		local pos = child.Position
 		local blacklisted = false
-		for bl_pos,_ in pairs(blacklists) do
+		for bl_pos in pairs(blacklists) do
 			if bl_pos == pos then
 				blacklisted = true
 				break
@@ -86,20 +78,18 @@ local function fill_parts_with_rock()
 		end
 
 		if not blacklisted then
-			terrain_service:FillBlock(
+			terrain:FillBlock(
 				child.CFrame,
 				child.Size,
 				Enum.Material.Rock
 			)
 		else
-			-- clear terrain and mark visually
-			terrain_service:FillBlock(child.CFrame, child.Size, Enum.Material.Air)
+			terrain:FillBlock(child.CFrame, child.Size, Enum.Material.Air)
 			child.BrickColor = BrickColor.new("Bright red")
 		end
 	end
 end
 
--- // module start
 function module.start_module()
 	flood_map_with_parts()
 	fill_parts_with_rock()

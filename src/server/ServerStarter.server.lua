@@ -1,21 +1,20 @@
-------------------
--- // Praxitos
--- // Primary Server Setup Handler
-------------------
+--!strict
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+-- local Logger = require(ReplicatedStorage.Shared.Library.Logger)("ServerStarter")
 
--- // Variable References
-local replicatedstorage_service     = game:GetService("ReplicatedStorage")
-local modules_folder                = replicatedstorage_service.Shared.Modules
+local modules_folder = ReplicatedStorage.Shared.Modules["Server Modules"]
 
--- // Functions
+	print("Starting server modules")
 
--- Starts all the Modules
-for _, child in pairs(modules_folder["Server Modules"]:GetChildren()) do
-    local required_child = require(child)
-    if required_child.start_module then
-        required_child.start_module()
-    end
+	for _, child in ipairs(modules_folder:GetChildren()) do
+	if child:IsA("ModuleScript") then
+		local ok, mod = pcall(require, child)
+		if ok and mod.start_module then
+			mod:start_module()
+		else
+			warn("Failed to load module", child.Name)
+		end
+	end
 end
 
--- // disable shiftlock
 game.StarterPlayer.EnableMouseLockOption = false

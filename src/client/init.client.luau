@@ -1,33 +1,30 @@
-------------------
--- // Praxitos
--- // Primary Client Setup Handler
-------------------
+--!strict
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
+-- local Logger = require(ReplicatedStorage.Shared.Library.Logger)("ClientStarter")
 
--- // Variable References
-local replicatedstorage_service     = game:GetService("ReplicatedStorage")
-local modules_folder                = replicatedstorage_service.Shared.Modules
+local modules_folder = ReplicatedStorage.Shared.Modules["Client Modules"]
 
--- // Functions
--- Starts all the Modules
 local function start_modules()
-    for _, child in pairs(modules_folder["Client Modules"]:GetChildren()) do
-        local required_child = require(child)
-        if required_child.start_module then
-            required_child.start_module()
-        end
-    end
+	print("Starting client modules")
+	for _, child in ipairs(modules_folder:GetChildren()) do
+		if child:IsA("ModuleScript") then
+			local ok, mod = pcall(require, child)
+			if ok and mod.start_module then
+				mod:start_module()
+			else
+				warn("Failed to load module", child.Name)
+			end
+		end
+	end
 end
 
--- Disable Base Roblox Setups
 local function disable_base_setups()
-    
-    -- // disables autorotate
-    game.Players.LocalPlayer.CharacterAdded:Connect(function(character)
-        local humanoid = character:WaitForChild("Humanoid")
-        humanoid.AutoRotate = false
-    end)
+	Players.LocalPlayer.CharacterAdded:Connect(function(character)
+		local humanoid = character:WaitForChild("Humanoid")
+		humanoid.AutoRotate = false
+	end)
 end
 
--- // Init
 start_modules()
 disable_base_setups()
