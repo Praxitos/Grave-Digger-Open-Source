@@ -14,19 +14,11 @@ end
 
 
 tool.Activated:Connect(function()
-	print("Tool activated!")
     local raycast = send_raycast(Workspace.CurrentCamera.CFrame.Position, Workspace.CurrentCamera.CFrame.LookVector * 13)
-    print("Raycast result:", raycast)
 
-    if raycast.Instance == nil then return end
+    if raycast == nil then return end
 
     if raycast.Instance and raycast.Instance == game.Workspace.Terrain and raycast.Material == Enum.Material.Rock then
-    
-        print("Terrain hit at position:", raycast.Position)
         delete_terrain:FireServer(raycast.Position)
-    else
-        print("No terrain hit.")
     end
 end)
-
-print("Client script loaded for", tool.Name)

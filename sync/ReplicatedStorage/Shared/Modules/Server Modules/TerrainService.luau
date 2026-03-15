@@ -101,8 +101,6 @@ function module.start_module()
 
 		delete_terrain.OnServerEvent:Connect(function(player, position)
 
-		print("[TERRAIN_SERVICE:: Requested Delete_Terrain at", position, "from", player.Name, "]")
-
 		local terrain_chunks_folder = workspace:WaitForChild("TerrainChunks")
 		local chunk_part: Part? = nil
 
@@ -134,8 +132,6 @@ function module.start_module()
 		string_value.Name = "Edit_" .. time()
 		string_value.Value = string.format("%f,%f,%f", position.X, position.Y, position.Z)
 		string_value.Parent = edits_folder
-
-		print("[TERRAIN_SERVICE:: Created edit", string_value.Name, "in chunk", chunk_part.Name, "]")
 
 	end)
 end

@@ -26,6 +26,5 @@ function Util.merge(dest: {}, src: {}): {}
 	end
 	return dest
 end
-
 return Util
 

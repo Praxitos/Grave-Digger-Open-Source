@@ -116,7 +116,7 @@ function module.start_module()
 			local values = edit_string:split(",")
 			local x, y, z = tonumber(values[1]), tonumber(values[2]), tonumber(values[3])
 			if x and y and z then
-				Workspace.Terrain:FillBall(Vector3.new(x, y, z), 4, Enum.Material.Air)
+				Workspace.Terrain:FillBall(Vector3.new(x, y, z), 6, Enum.Material.Air)
 			end
 		end)
 	end

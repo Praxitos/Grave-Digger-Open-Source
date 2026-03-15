@@ -6,7 +6,6 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local PlayerService = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 
-
 local terrain_chunks = workspace:WaitForChild("TerrainChunks")
 local TerrainChunkClass = require(ReplicatedStorage.Shared.Library.Classes.TerrainChunkClass)
 local LocalPlayer = PlayerService.LocalPlayer
@@ -21,13 +20,13 @@ local offscreen_margin = 300
 local loads_per_frame = 2
 
 local last_tick = 0
-local chunk_classes = {}
-local chunk_list = {}
 local load_queue = {}
 
 local function queue_load(chunk)
 	table.insert(load_queue, chunk)
 end
+
+-- Removed render_edits() — Load() now handles edit application directly
 
 local function process_load_queue()
 	local i = 0
@@ -35,15 +34,10 @@ local function process_load_queue()
 		local chunk = table.remove(load_queue, 1)
 		if not chunk then break end
 		if not chunk.loaded then
-			chunk:Load()
+			chunk:Load() -- Load() internally applies all edits
 			chunk.loaded = true
-			
-			for _, child in pairs(chunk.reference_part.Edits:GetChildren()) do
-		
-		
-			end
-		i += 1
 		end
+		i += 1
 	end
 end
 
@@ -68,7 +62,7 @@ local function chunk_visible(camera, part, margin)
 		local pos, visible = camera:WorldToViewportPoint(center + offset)
 		if visible then
 			if pos.X > -margin and pos.X < viewport.X + margin
-			and pos.Y > -margin and pos.Y < viewport.Y + margin then
+				and pos.Y > -margin and pos.Y < viewport.Y + margin then
 				return true
 			end
 		end
@@ -88,7 +82,7 @@ end
 
 function module.start_module()
 
-	local chunk_classes_dict: {[string]: TerrainChunkClass.TerrainChunkClass } = {}
+	local chunk_classes_dict: {[string]: TerrainChunkClass.TerrainChunkClass} = {}
 	local chunk_list_array: {TerrainChunkClass.TerrainChunkClass} = {}
 
 	for _, part in ipairs(terrain_chunks:GetChildren()) do
@@ -101,32 +95,29 @@ function module.start_module()
 			table.insert(chunk_list_array, chunk)
 		end
 
-		local edits_folder = part:WaitForChild("Edits")	
+		local edits_folder = part:WaitForChild("Edits")
 
 		edits_folder.ChildAdded:Connect(function(child)
-			print("New edit added to chunk", part.Name, "Edit:", child.Name, "Value:", child.Value)
-			if not child:IsA("StringValue") then warn(child.Name, "Is not a string value, returning...") return end
+			if not child:IsA("StringValue") then
+				warn(child.Name, "is not a StringValue, returning...")
+				return
+			end
 
 			local chunk = chunk_classes_dict[part.Name]
-			if not chunk then print("ClientTerrainService: No chunk found for edit", part.Name) return end
+			if not chunk then
+				warn("ClientTerrainService: No chunk found for part", part.Name)
+				return
+			end
 
 			local edit_string = child.Value
 			table.insert(chunk.edits, edit_string)
 
-			-- true parse editor
+			-- Apply the edit immediately to live terrain
 			local values = edit_string:split(",")
-
-			-- Parse edit
-			local x,y,z= values[1], values[2], values[3]
-			if not x then print("Client Terrain Service: No X Value found.") return end
-
-			local position = Vector3.new(tonumber(x), tonumber(y), tonumber(z))
-			local r = 4
-			--local mat = Enum.Material[material] or Enum.Material.Air
-
-			-- Apply terrain edit
-			Workspace.Terrain:FillBall(position, r, Enum.Material.Air)
-			print("Applied terrain edit at", position, "with radius", r, "and material Air")
+			local x, y, z = tonumber(values[1]), tonumber(values[2]), tonumber(values[3])
+			if x and y and z then
+				Workspace.Terrain:FillBall(Vector3.new(x, y, z), 6, Enum.Material.Air)
+			end
 		end)
 	end
 
@@ -185,8 +176,7 @@ function module.start_module()
 						queue_load(chunk)
 					end
 				else
-					-- Checks to see if it has entities/ loaded, or the player themselves is close enough to warrant keeping it loaded
-					if not has_entities and chunk.loaded and (LocalPlayer.Character.HumanoidRootPart.Position-chunk.reference_part.Position).Magnitude < 10 then
+					if not has_entities and chunk.loaded and (LocalPlayer.Character.HumanoidRootPart.Position - chunk.reference_part.Position).Magnitude < 10 then
 						chunk:Unload()
 						chunk.loaded = false
 					else
@@ -202,7 +192,6 @@ function module.start_module()
 				break
 			end
 		end
-		print(string.format("ClientTerrainService: Processed %d chunks. Loaded chunks: %d. Unloaded Chunks: %d.", processed, loaded_count, #chunk_list_array - loaded_count))
 	end)
 end
 

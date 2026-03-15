@@ -25,7 +25,7 @@ local HEAD_PITCH_CLAMP_MAX = math.rad(40)
 local HEAD_PITCH_MULTIPLIER = 0.6
 
 local SPRINT_THRESHOLD = 17
-local SPRINT_MAX_SPEED = 26
+local SPRINT_MAX_SPEED = 24
 
 local COLLISION_OFFSET = 0.3
 local FREE_LOOK_DISTANCE_MULTIPLIER = 2
@@ -137,7 +137,7 @@ function BaseCamera:Start()
 	self.TargetDistance = self.BaseDistance
 
 	self.BaseFOV = 70
-	self.MaxFOV = 73
+	self.MaxFOV = 80
 	self.CurrentFOV = self.BaseFOV
 
 	-- Seed yaw from current character facing so the camera

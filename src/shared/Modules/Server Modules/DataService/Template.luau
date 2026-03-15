@@ -12,6 +12,7 @@ return {
 			["Free Look"] = "Enum.KeyCode.LeftAlt",
 			["Shoulder Switch"] = "Enum.KeyCode.Q",
 			["First Person"] = "Enum.KeyCode.V",
+			["Sprint"] = "Enum.KeyCode.LeftShift",
 		}
 	},
 
