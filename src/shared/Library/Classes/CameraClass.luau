@@ -4,8 +4,6 @@
 --!native
 --!optimize 2
 
--- Library Dependencies
-local Types = require(script.Parent.Parent.Types.MainTypes);
 -- Class Definition
 --[=[
 	@class CameraClass
@@ -24,8 +22,6 @@ export type CameraClass = typeof(setmetatable({} :: {
 export type Camera_Type = {
     name: string,
     priority: number,
-    on_start: (...any) -> any,
-    on_end: (...any) -> any,
 }
 
 --[=[
@@ -33,10 +29,10 @@ export type Camera_Type = {
 
 	The CameraClass class is The Base Camera Type
 
-	@param CameraClassCreateInfo heraTypes.CameraClassCreateInfo
+	@param CameraClassCreateInfo Camera_Type
 	@return CameraClass
 ]=]
-function CameraClass.new(CameraClassCreateInfo : Types.Camera_Type) : CameraClass
+function CameraClass.new(CameraClassCreateInfo : Camera_Type) : CameraClass
     local class = setmetatable({}, CameraClass);
     class.className = "CameraClass";
     class.name = CameraClassCreateInfo.name;

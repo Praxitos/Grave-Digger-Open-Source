@@ -9,7 +9,6 @@ local Workspace = game:GetService("Workspace")
 
 -- // References
 local CameraClass = require(script.Parent.Parent.Parent.Parent.Library.Classes.CameraClass)
-local Types = require(script.Parent.Parent.Parent.Parent.Library.Types.MainTypes)
 
 -- // Constants
 local CAMERA_SMOOTH_SPEED    = 12
@@ -108,7 +107,7 @@ local function setFirstPersonVisibility(character: Model, hidden: boolean)
 end
 
 -- // Class Constructor
-function BaseCamera.new(cameraInfo: Types.Camera_Type)
+function BaseCamera.new(cameraInfo)
 	local self = CameraClass.new(cameraInfo)
 	setmetatable(self, { __index = BaseCamera })
 	self.CameraPosition = Camera.CFrame.Position
@@ -269,7 +268,7 @@ function BaseCamera:Update(dt)
 	local deltaY = math.clamp(-mouseDelta.Y * sensitivity, -10, 10)
 
 	self.CameraYaw   += math.rad(deltaX)
-	self.CameraPitch -= math.rad(deltaY)
+	self.CameraPitch += math.rad(deltaY)
 	self.CameraPitch  = math.clamp(self.CameraPitch, PITCH_CLAMP_MIN, PITCH_CLAMP_MAX)
 
 	-- Keep physics yaw in sync
@@ -363,7 +362,7 @@ function BaseCamera:End()
 end
 
 -- // Init
-local myCameraInfo: Types.Camera_Type = {
+local myCameraInfo = {
 	name        = "BasicCamera",
 	priority    = 1,
 	Connections = {},
