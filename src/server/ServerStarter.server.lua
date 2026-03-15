@@ -16,3 +16,6 @@ for _, child in pairs(modules_folder["Server Modules"]:GetChildren()) do
         required_child.start_module()
     end
 end
+
+-- // disable shiftlock
+game.StarterPlayer.EnableMouseLockOption = false

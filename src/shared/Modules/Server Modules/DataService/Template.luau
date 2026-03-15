@@ -10,6 +10,8 @@ return {
 
 		["Input Options"] = {
 			["Free Look"] = "Enum.KeyCode.LeftAlt",
+			["Shoulder Switch"] = "Enum.KeyCode.Q",
+			["First Person"] = "Enum.KeyCode.V",
 		}
 	},
 

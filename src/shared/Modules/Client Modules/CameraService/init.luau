@@ -47,6 +47,12 @@ end
 -- switch camera module
 function module.switch_camera(target_camera_name:string, abrupt_change:boolean)
     local target_camera_module = script:FindFirstChild(target_camera_name)
+
+    if current_camera_module and current_camera_module.name == target_camera_name then
+        warn("[CAMERASERVICE::] Already using the target camera module: ", target_camera_name)
+        return
+    end
+
     if not target_camera_module then
         warn("[CAMERASERVICE::] No Camera Module Found with the name: ", target_camera_name)
         return
