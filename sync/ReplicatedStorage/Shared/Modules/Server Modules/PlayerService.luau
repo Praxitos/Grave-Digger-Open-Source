@@ -5,6 +5,7 @@ local Players = game:GetService("Players")
 
 
 local function give_item(player)
+	task.wait(3)
 	local ItemsService = require(script.Parent:WaitForChild("ItemsService"))
 	ItemsService.give_item(player, "Pickaxe")
 end
@@ -31,11 +32,22 @@ local function setup_gamedata(player: Player)
 	hats_folder.Parent = accessorys_folder
 end
 
+local function setup_characterdata(character: Model)
+	local folder = Instance.new("Folder")
+	folder.Name = "CharacterData"
+	folder.Parent = character
+
+	local Holster_Folder = Instance.new("Folder")
+	Holster_Folder.Name = "Rendered_Holsters"
+	Holster_Folder.Parent = folder
+end
+
 local function setup_player(player: Player)
 	setup_gamedata(player)
 
 	player.CharacterAdded:Connect(function()
 		give_item(player)
+		setup_characterdata(player.Character)
 	end)
 
 	print("PlayerService: Set up player", player.Name)

@@ -1,26 +1,31 @@
 local module = {}
 
 export type TerrainChunkClassCreateInfo = {
-    name: string,
-    reference_part: BasePart,
-    edits: {string}?,
-    entities: {any}?,
-}
+    name : string;
+    reference_part : BasePart;
+    edits : {string}?;
+    entities : {any}?;
+};
 
 export type CameraClassCreateInfo = {
-    name: string,
-    priority: number,
-}
+    name: string;
+    priority: number;
+};
 
 export type BaseGunCreateInfo = {
-    name: string,
-}
+    name : string;
+};
 
 export type BaseToolCreateInfo = {
-    name: string,
+    name : string;
+    item_image: string;
+    on_give: () -> ();
+    on_equip: () -> ();
+    on_activation: () -> ();
+    on_unequip: () -> ();
 
-    holster_reference: Instance?,
-    model_reference: Instance?,
-}
+    holster_reference: Instance?;
+    model_reference: Instance?;
+};
 
 return module

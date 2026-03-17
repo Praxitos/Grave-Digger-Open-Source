@@ -166,7 +166,6 @@ function module.start_module()
 				end
 			elseif distance < load_distance then
 				if reference.BrickColor == BrickColor.new("Bright red") then
-					warn(string.format("ClientTerrainService: Chunk %s is blacklisted", chunk.name))
 					continue
 				end
 

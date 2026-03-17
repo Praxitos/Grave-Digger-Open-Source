@@ -166,7 +166,6 @@ function module.start_module()
 				end
 			elseif distance < load_distance then
 				if reference.BrickColor == BrickColor.new("Bright red") then
-					warn(string.format("ClientTerrainService: Chunk %s is blacklisted", chunk.name))
 					continue
 				end
 
@@ -176,7 +175,7 @@ function module.start_module()
 						queue_load(chunk)
 					end
 				else
-					if not has_entities and chunk.loaded and (LocalPlayer.Character.HumanoidRootPart.Position - chunk.reference_part.Position).Magnitude < 10 then
+					if not has_entities and chunk.loaded and (LocalPlayer.Character:WaitForChild("HumanoidRootPart").Position - chunk.reference_part.Position).Magnitude < 10 then
 						chunk:Unload()
 						chunk.loaded = false
 					else

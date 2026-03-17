@@ -42,16 +42,4 @@ end
 
 ]=]
 
-function BaseTool:on_give()
-end
-
-function BaseTool:on_equip()
-end
-
-function BaseTool:on_activation()
-end
-
-function baseTool:on_unequip()
-end
-
 return BaseTool;

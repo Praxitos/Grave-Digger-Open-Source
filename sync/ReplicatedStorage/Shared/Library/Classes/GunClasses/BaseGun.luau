@@ -1,27 +1,48 @@
+-- This file is a part of the ... library. ... is licensed under the terms of the MIT License. For more information, see LICENSE.md
+
 --!strict
 --!native
 --!optimize 2
 
-local Types = require(script.Parent.Parent.Parent.Types)
+-- Library Dependencies
+local Types = require(script.Parent.Parent.Parent.Types);
 
-local BaseGun = {}
-BaseGun.__index = BaseGun
+-- Class Definition
+--[=[
+	@class BaseGun
 
+	The BaseGun class is the primary GunClass
+]=]
+local BaseGun = {};
+BaseGun.__index = BaseGun;
+
+-- Type Definition
 export type BaseGun = typeof(setmetatable({} :: {
-	className: "BaseGun",
-	name: string,
+	className : "BaseGun";
 }, {} :: typeof(BaseGun)))
 
-function BaseGun.new(BaseGunCreateInfo: Types.BaseGunCreateInfo): BaseGun
-	local class = setmetatable({}, BaseGun)
+--[=[
+	@within BaseGun
 
-	class.className = "BaseGun"
-	class.name = BaseGunCreateInfo.name
+	The BaseGun class is the primary GunClass
 
-	return class
+	@param BaseGunCreateInfo heraTypes.BaseGunCreateInfo
+	@return BaseGun
+]=]
+function BaseGun.new(BaseGunCreateInfo : Types.BaseGunCreateInfo) : BaseGun
+	local class = setmetatable({}, BaseGun);
+	class.className = "BaseGun";
+	class.name = BaseGunCreateInfo.name;
+
+	return class;
 end
 
+--[=[
+	@within BaseGun
+
+]=]
 function BaseGun:Foo()
+
 end
 
-return BaseGun
+return BaseGun;

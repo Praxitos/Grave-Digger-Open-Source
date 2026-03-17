@@ -18,6 +18,7 @@ export type BaseGunCreateInfo = {
 
 export type BaseToolCreateInfo = {
     name : string;
+    item_image: string;
     on_give: () -> ();
     on_equip: () -> ();
     on_activation: () -> ();
