@@ -4,6 +4,8 @@
 --!native
 --!optimize 2
 
+local Types = require(script.Parent.Parent.Types);
+
 -- Class Definition
 --[=[
 	@class CameraClass

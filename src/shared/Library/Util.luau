@@ -26,5 +26,15 @@ function Util.merge(dest: {}, src: {}): {}
 	end
 	return dest
 end
+
+function Util.quick_weld(p0, p1, parent, name, weld_type)
+	if not weld_type then weld_type = Instance.new("Weld") end
+
+	weld_type.Part0 = p0
+	weld_type.Part1 = p1
+	weld_type.Parent = parent
+	weld_type.Name = name
+end
+
 return Util
 

@@ -63,9 +63,7 @@ local function sprintLoop()
 			local velocity = Character.HumanoidRootPart.AssemblyLinearVelocity
 			local true_speed = velocity.Magnitude
 
-			print("Current Velocity:", velocity, "Current Speed:", true_speed)
 
-			-- if the true speed is not within two number range of current speed, quit sprint and reset
 		end
 		
 		local velocity = Character.HumanoidRootPart.AssemblyLinearVelocity
@@ -74,7 +72,6 @@ local function sprintLoop()
 		if math.abs(true_speed - Humanoid.WalkSpeed) > 2 then
 			Sprinting = false
 			resetSpeed()
-			print("Speed desync detected. Resetting speed.")
 			break
 		end
 

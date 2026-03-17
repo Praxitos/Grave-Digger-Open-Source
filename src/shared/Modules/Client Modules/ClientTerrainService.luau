@@ -176,7 +176,7 @@ function module.start_module()
 						queue_load(chunk)
 					end
 				else
-					if not has_entities and chunk.loaded and (LocalPlayer.Character.HumanoidRootPart.Position - chunk.reference_part.Position).Magnitude < 10 then
+					if not has_entities and chunk.loaded and (LocalPlayer.Character:WaitForChild("HumanoidRootPart").Position - chunk.reference_part.Position).Magnitude < 10 then
 						chunk:Unload()
 						chunk.loaded = false
 					else

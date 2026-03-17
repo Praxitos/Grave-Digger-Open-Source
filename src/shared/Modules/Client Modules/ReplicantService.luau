@@ -13,7 +13,7 @@ end
 local function setup_player(player)
     local Character = player.Character or player.CharacterAdded:Wait()
 
-   setup_light(Character.Torso) 
+   setup_light(Character:WaitForChild("Torso")) 
 
    player.CharacterAdded:Connect(function(char)
         setup_light(char.Torso)

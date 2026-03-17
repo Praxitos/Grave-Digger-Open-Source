@@ -8,6 +8,9 @@ local terrain_service = game:GetService("Workspace").Terrain
 	@class TerrainChunkClass
 	The TerrainChunkClass class is Used for defining terrain Classes
 ]=]
+
+local Types = require(script.Parent.Parent.Types);
+
 local TerrainChunkClass = {};
 TerrainChunkClass.__index = TerrainChunkClass;
 -- Type Definition
@@ -92,4 +95,16 @@ function TerrainChunkClass:CleanUp()
 	self.edits = {}
 	self.entities = {}
 end
+export type BaseGunCreateInfo = {
+	name : string;
+};
+
+export type BaseToolCreateInfo = {
+	name : string;
+};
+
+export type PickaxeCreateInfo = {
+	name : string;
+};
+
 return TerrainChunkClass;

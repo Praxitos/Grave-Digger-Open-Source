@@ -1,7 +1,7 @@
 --!strict
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
--- local Logger = require(ReplicatedStorage.Shared.Library.Logger)("ClientStarter")
+local StarterGui = game:GetService("StarterGui")
 
 local modules_folder = ReplicatedStorage.Shared.Modules["Client Modules"]
 
@@ -20,6 +20,11 @@ local function start_modules()
 end
 
 local function disable_base_setups()
+	-- // disable coreui, like leaderboard, healthbar, and backpack
+	StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Backpack, false)
+	StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Health, false)
+	StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.PlayerList, false)
+
 	Players.LocalPlayer.CharacterAdded:Connect(function(character)
 		local humanoid = character:WaitForChild("Humanoid")
 		humanoid.AutoRotate = false
