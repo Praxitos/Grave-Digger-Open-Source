@@ -4,7 +4,7 @@ local InventorySlots = {
     ["1"] = {
         ["Keybind"] = Enum.KeyCode.One,
         ["Tool"] = nil,
-        ["UI"] = nil
+        ["UI"] = nil -- blah blah
     },
     ["2"] = {
         ["Keybind"] = Enum.KeyCode.Two,
