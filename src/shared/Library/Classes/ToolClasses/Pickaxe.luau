@@ -39,7 +39,7 @@ end
 -- called when the item enters the inventory
 function Pickaxe:on_give(tool: Tool, holster: Model)
 	self.tool = tool
-	self.actual_holster = utilities_module.reverse_search_holster(game.Players.LocalPlayer, self.holster_reference.Name)
+	self.actual_holster = utilities_module.reverse_search_holster(game.Players.LocalPlayer, self.holster_reference.name)
 	print("Pickaxe received and set actual_holster to:", self.actual_holster)
 end
 

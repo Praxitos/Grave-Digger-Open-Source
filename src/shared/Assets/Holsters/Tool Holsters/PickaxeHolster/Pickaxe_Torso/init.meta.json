@@ -1,0 +1,17 @@
+{
+  "className": "Part",
+  "properties": {
+    "CFrame": [-46.3907, 5.3446, -195.3484, 1, 0, 0, 0, 1, 0, 0, 0, 1],
+    "Color": [234, 184, 146],
+    "EnableFluidForces": false,
+    "FormFactor": "Symmetric",
+    "LeftParamA": 0,
+    "LeftParamB": 0,
+    "LeftSurface": "Weld",
+    "RightParamA": 0,
+    "RightParamB": 0,
+    "RightSurface": "Weld",
+    "Size": [2, 2, 1],
+    "Transparency": 1
+  }
+}

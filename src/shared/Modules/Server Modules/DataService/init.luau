@@ -6,7 +6,7 @@ local players_service = game:GetService("Players")
 
 -- // dependencies
 local externals_folder = replicated_storage.Shared.Library.Externals
-local profileservice_module = require(externals_folder.ProfileService)
+local profileservice_module = require(externals_folder:WaitForChild("ProfileService"))
 
 local template_module = require(script.Template)
 local utilities_module = require(script.Utilities)
