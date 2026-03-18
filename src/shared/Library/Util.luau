@@ -70,5 +70,52 @@ function Util.reverse_search_holster(player: Player, name: string)
 	return holster
 end
 
+function Util.send_raycast(origin: Vector3, direction: Vector3, blacklist: table, whitelist: table)
+	if not origin or not direction then warn("[SEND_RAYCAST() FAILED! Origin/Direction not provided") return end
+
+    local raycast_params = RaycastParams.new()
+
+	if blacklist then
+		raycast_params.FilterType = Enum.RaycastFilterType.Blacklist
+    	raycast_params.FilterDescendantsInstances = blacklist
+	elseif whitelist then
+		raycast_params.FilterType = Enum.RaycastFilterType.Whitelist
+		raycast_params.FilterDescendantsInstances = whitelist
+	end
+	
+    local raycast_result = workspace:Raycast(origin, direction, raycast_params)
+    return raycast_result
+end
+
+function Util.MakeFuzzyFinder(list)
+	local function score(str, pat)
+		local score = 0
+		local ip = 1
+		for i = 1, #pat do
+			local j = string.find(str, string.sub(pat, i, i), j or 1, true)
+			if j then
+				score += 1 / (0.1 + j + i / #pat)
+				ip = i + 1
+			end
+		end
+		return score
+	end
+
+	return function(text)
+		table.sort(list, function(a, b)
+			return score(a, text) > score(b, text)
+		end)
+		return list
+	end
+end
+
+function Util.GetNames(list)
+	local names = {}
+	for _, item in list do
+		table.insert(names, typeof(item) == "Instance" and item.Name or tostring(item))
+	end
+	return names
+end
+
 return Util
 

@@ -3,13 +3,6 @@ local module = {}
 
 local Players = game:GetService("Players")
 
-
-local function give_item(player)
-	task.wait(3)
-	local ItemsService = require(script.Parent:WaitForChild("ItemsService"))
-	ItemsService.give_item(player, "Pickaxe")
-end
-
 local function setup_gamedata(player: Player)
 	local player_data_folder = Instance.new("Folder")
 	player_data_folder.Name = "GameData"
@@ -46,7 +39,6 @@ local function setup_player(player: Player)
 	setup_gamedata(player)
 
 	player.CharacterAdded:Connect(function()
-		give_item(player)
 		setup_characterdata(player.Character)
 	end)
 

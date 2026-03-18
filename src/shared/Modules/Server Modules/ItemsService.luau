@@ -8,10 +8,11 @@ local item_classes = game:GetService("ReplicatedStorage").Shared.Library.Classes
 
 
 function module.give_item(player: Player, item: string)
+    print("Received with:", player.Name, item)
     local item_module = item_classes:FindFirstChild(item)
     if not item_module then
         warn("ItemsService: Item class not found:", item)
-        return
+        return "ItemService: Item Class not found.", item
     end
 
     -- require class
@@ -27,6 +28,7 @@ function module.give_item(player: Player, item: string)
     tool.Name = object.name
     tool.Parent = player:WaitForChild("Backpack")
 
+    tool.RequiresHandle = false
     print("ItemsService: Gave item", item, "to", player.Name)
 
     -- check instance property (not class property)
@@ -39,6 +41,8 @@ function module.give_item(player: Player, item: string)
     else
         print("No Holster.", object)
     end
+
+    return "Successfully gave item."
 end
 
 

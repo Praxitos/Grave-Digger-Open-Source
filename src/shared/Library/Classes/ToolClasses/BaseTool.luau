@@ -1,45 +1,36 @@
--- This file is a part of the ... library. ... is licensed under the terms of the MIT License. For more information, see LICENSE.md
+local BaseTool = {}
+BaseTool.__index = BaseTool
 
---!strict
---!native
---!optimize 2
-
--- Library Dependencies
-local Types = require(script.Parent.Parent.Parent.Types);
-
--- Class Definition
---[=[
-	@class BaseTool
-
-	The BaseTool class is Base Tool Class
-]=]
-local BaseTool = {};
-BaseTool.__index = BaseTool;
-
--- Type Definition
 export type BaseTool = typeof(setmetatable({} :: {
-	className : "BaseTool";
+	className: "BaseTool",
+	name: string,
+	tool: Tool?
 }, {} :: typeof(BaseTool)))
 
---[=[
-	@within BaseTool
+function BaseTool.new(BaseToolCreateInfo: Types.BaseToolCreateInfo): BaseTool
+	local self = setmetatable({}, BaseTool)
 
-	The BaseTool class is Base Tool Class
+	self.className = "BaseTool"
+	self.name = BaseToolCreateInfo.name
+	self.tool = nil
 
-	@param BaseToolCreateInfo heraTypes.BaseToolCreateInfo
-	@return BaseTool
-]=]
-function BaseTool.new(BaseToolCreateInfo : Types.BaseToolCreateInfo) : BaseTool
-	local class = setmetatable({}, BaseTool);
-	class.className = "BaseTool";
-	class.name = BaseToolCreateInfo.name;
-
-	return class;
+	return self
 end
 
---[=[
-	@within BaseTool
+function BaseTool:on_give(tool: Tool, holster: Model?)
+	self.tool = tool
+end
 
-]=]
+function BaseTool:equip()
+	error(self.className .. " missing equip()")
+end
 
-return BaseTool;
+function BaseTool:unequip()
+	error(self.className .. " missing unequip()")
+end
+
+function BaseTool:activate()
+	error(self.className .. " missing activate()")
+end
+
+return BaseTool

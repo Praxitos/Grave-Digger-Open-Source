@@ -114,9 +114,9 @@ function module.start_module()
 
 			-- Apply the edit immediately to live terrain
 			local values = edit_string:split(",")
-			local x, y, z = tonumber(values[1]), tonumber(values[2]), tonumber(values[3])
+			local x, y, z, power = tonumber(values[1]), tonumber(values[2]), tonumber(values[3]), tonumber(values[4])
 			if x and y and z then
-				Workspace.Terrain:FillBall(Vector3.new(x, y, z), 6, Enum.Material.Air)
+				Workspace.Terrain:FillBall(Vector3.new(x, y, z), power, Enum.Material.Air)
 			end
 		end)
 	end

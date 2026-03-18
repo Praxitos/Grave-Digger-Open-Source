@@ -99,8 +99,9 @@ function module.start_module()
 	flood_map_with_parts()
 	fill_parts_with_rock()
 
-		delete_terrain.OnServerEvent:Connect(function(player, position)
+		delete_terrain.OnServerEvent:Connect(function(player, position, power)
 
+		power = power or "6"
 		local terrain_chunks_folder = workspace:WaitForChild("TerrainChunks")
 		local chunk_part: Part? = nil
 
@@ -130,7 +131,7 @@ function module.start_module()
 
 		local string_value = Instance.new("StringValue")
 		string_value.Name = "Edit_" .. time()
-		string_value.Value = string.format("%f,%f,%f", position.X, position.Y, position.Z)
+		string_value.Value = string.format("%f,%f,%f, %f", position.X, position.Y, position.Z, power)
 		string_value.Parent = edits_folder
 
 	end)
