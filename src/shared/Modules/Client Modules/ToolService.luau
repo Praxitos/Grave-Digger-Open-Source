@@ -10,55 +10,12 @@ local ToolHolster_Folder = game:GetService("ReplicatedStorage").Shared.Assets.Ho
 local GunClasses = game:GetService("ReplicatedStorage").Shared.Library.Classes.GunClasses
 local ToolClasses = game:GetService("ReplicatedStorage").Shared.Library.Classes.ToolClasses
 
+local inventory_service = require(script.Parent.InventoryService)
 local Util_Module = require(script.Parent.Parent.Parent.Library.Util)
 
 module.RegisteredTools = {}
 
--- // Internal listeners
-module._registration_added_listeners = {}
-module._registration_removed_listeners = {}
-
--- // Public API
-
-function module.on_registration_added(func)
-	table.insert(module._registration_added_listeners, func)
-
-	-- return disconnect function
-	return function()
-		local index = table.find(module._registration_added_listeners, func)
-		if index then
-			table.remove(module._registration_added_listeners, index)
-		end
-	end
-end
-
-function module.on_registration_removed(func)
-	table.insert(module._registration_removed_listeners, func)
-
-	return function()
-		local index = table.find(module._registration_removed_listeners, func)
-		if index then
-			table.remove(module._registration_removed_listeners, index)
-		end
-	end
-end
-
--- // Internal dispatchers
-
-local function fire_added(instance, tool)
-	for _, callback in ipairs(module._registration_added_listeners) do
-		task.spawn(callback, instance, tool)
-	end
-end
-
-local function fire_removed(instance, tool)
-	for _, callback in ipairs(module._registration_removed_listeners) do
-		task.spawn(callback, instance, tool)
-	end
-end
-
 -- // Main
-
 function module.start_module()
 
 	Backpack.ChildAdded:Connect(function(child)
@@ -83,9 +40,7 @@ function module.start_module()
 		instance:on_give(child)
 
 		module.RegisteredTools[child.Name] = instance
-
-		-- Fire event AFTER full initialization
-		fire_added(instance, child)
+		inventory_service.assign_tool(module.RegisteredTools[child.Name])
 	end)
 
 	Backpack.ChildRemoved:Connect(function(child)
@@ -98,11 +53,9 @@ function module.start_module()
 		if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild(child.Name) then
 			return
 		end
-
+		
+		inventory_service.remove_tool(module.RegisteredTools[child.Name])
 		module.RegisteredTools[child.Name] = nil
-
-		-- Fire removal event
-		fire_removed(instance, child)
 	end)
 
 	-- // Holster system (unchanged, just cleaned slightly)
@@ -137,6 +90,27 @@ function module.start_module()
 		)
 
 		clone.Parent = character.CharacterData.Rendered_Holsters
+	end)
+
+	Holster_Folder.ChildRemoved:Connect(function(child)
+		print("Detected Deletion in the Holster Folder...")
+		local character = LocalPlayer.Character
+		if not character then warn("No character..") return end
+
+		local rendered_folder = character:FindFirstChild("CharacterData")
+			and character.CharacterData:FindFirstChild("Rendered_Holsters")
+
+		if not rendered_folder then print("No RenderedFolder") return end
+
+		-- Find the cloned holster
+		local holster = rendered_folder:FindFirstChild(child.Name)
+		if not holster then
+			warn("ToolService: Could not find rendered holster to remove:", child.Name)
+			return
+		end
+
+		-- Destroy it (this also removes welds automatically)
+		holster:Destroy()
 	end)
 end
 

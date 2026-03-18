@@ -45,6 +45,52 @@ function module.give_item(player: Player, item: string)
     return "Successfully gave item."
 end
 
+function module.remove_item(player: Player, item: string)
+    print("Removing item:", player.Name, item)
+
+    local backpack = player:FindFirstChild("Backpack")
+    local character = player.Character
+
+    local removed = false
+
+    --  Remove from Backpack
+    if backpack then
+        local tool = backpack:FindFirstChild(item)
+        if tool then
+            tool:Destroy()
+            removed = true
+        end
+    end
+
+    --  Remove if currently equipped
+    if character then
+        local tool = character:FindFirstChild(item)
+        if tool then
+            tool:Destroy()
+            removed = true
+        end
+    end
+
+    -- Remove holster reference
+    local holsters_folder = player:FindFirstChild("GameData")
+        and player.GameData:FindFirstChild("Accessorys")
+        and player.GameData.Accessorys:FindFirstChild("Holsters")
+
+    if holsters_folder then
+        local holster_value = holsters_folder:FindFirstChild(item .. "Holster")
+        if holster_value then
+            holster_value:Destroy()
+        end
+    end
+
+    if removed then
+        print("ItemsService: Removed item", item, "from", player.Name)
+        return "Successfully removed item."
+    else
+        warn("ItemsService: Item not found:", item)
+        return "Item not found."
+    end
+end
 
 function module.start_module()
     -- validate item class modules

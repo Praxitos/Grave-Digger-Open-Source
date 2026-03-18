@@ -1,8 +1,6 @@
 local module = {}
 
-local toolservice = require(script.Parent.ToolService)
 local player = game.Players.LocalPlayer
-local backpack = player:WaitForChild("Backpack")
 
 local UIS = game:GetService("UserInputService")
 
@@ -130,21 +128,12 @@ end
 -- // Main
 
 function module.start_module()
-
     -- Create permanent slots
     for slotname, slot in pairs(InventorySlots) do
         if slot.PermanentUISpot then
             create_slot_ui(slotname, slot)
         end
     end
-
-    toolservice.on_registration_added(function(toolObject)
-        assign_tool(toolObject)
-    end)
-
-    toolservice.on_registration_removed(function(toolObject)
-        remove_tool(toolObject)
-    end)
 
     -- Keybinds
     UIS.InputBegan:Connect(function(input, gameProcessed)
@@ -163,6 +152,14 @@ function module.start_module()
             end
         end
     end)
+end
+
+function module.assign_tool(tool)
+    assign_tool(tool)
+end
+
+function module.remove_tool(tool)
+    remove_tool(tool)
 end
 
 return module

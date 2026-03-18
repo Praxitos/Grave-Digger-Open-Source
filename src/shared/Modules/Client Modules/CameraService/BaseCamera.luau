@@ -173,8 +173,9 @@ function BaseCamera:Start()
 
 				self.IsRightShoulder = not self.IsRightShoulder
 				self.TargetShoulder =
-					self.IsRightShoulder and self.RightShoulderOffset or self.LeftShoulderOffset
+				self.IsRightShoulder and self.RightShoulderOffset or self.LeftShoulderOffset
 
+				character.Humanoid.AutoRotate = false
 				task.delay(SHOULDER_DEBOUNCE, function()
 					self.ShoulderDebounce = false
 				end)
@@ -191,6 +192,7 @@ function BaseCamera:Start()
 				InputService.MouseBehavior = Enum.MouseBehavior.Default
 				InputService.MouseIconEnabled = true
 
+				character.Humanoid.AutoRotate = true
 			elseif input.KeyCode.Name == firstPersonKey then
 
 				-- Debounce: ignore rapid re-presses
@@ -208,6 +210,7 @@ function BaseCamera:Start()
 				-- first person so there's no drift.
 				self.FreeLookYaw   = self.CameraYaw
 				self.FreeLookPitch = self.CameraPitch
+				character.Humanoid.AutoRotate = false
 
 				task.delay(FIRST_PERSON_DEBOUNCE, function()
 					self.FirstPersonDebounce = false
@@ -294,7 +297,6 @@ function BaseCamera:Update(dt)
 
 	if not root or not humanoid then return end
 
-	humanoid.AutoRotate = false
 
 	self.RaycastParams.FilterDescendantsInstances = {character}
 
@@ -318,7 +320,10 @@ function BaseCamera:Update(dt)
 		end
 		-- When not right-clicking we intentionally do nothing with mouseDelta
 		-- so the camera stays frozen while the cursor roams freely.
+
+		humanoid.AutoRotate = true
 	else
+		humanoid.AutoRotate = false
 		-- Normal: drive the main camera angles.
 		self.CameraYaw   += math.rad(-mouseDelta.X * sensitivity)
 		self.CameraPitch += math.rad(-mouseDelta.Y * sensitivity)
