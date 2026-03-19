@@ -1,155 +1,201 @@
 --!strict
 
 -- // Services
-local InputService = game:GetService("UserInputService")
-local RunService = game:GetService("RunService")
-local PlayerService = game:GetService("Players")
+local InputService      = game:GetService("UserInputService")
+local RunService        = game:GetService("RunService")
+local PlayerService     = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local Workspace = game:GetService("Workspace")
+local Workspace         = game:GetService("Workspace")
 
 -- // References
 local CameraClass = require(script.Parent.Parent.Parent.Parent.Library.Classes.CameraClass)
 
--- // Constants
-local CAMERA_SMOOTH_SPEED = 12
-local SHOULDER_SMOOTH_SPEED = 12
-local DISTANCE_SMOOTH_SPEED = 4
-local FOV_INCREASE_SPEED = 3
-local FOV_DECREASE_SPEED = 1.5
+------------------------------------------------------------------------
+-- TUNING
+------------------------------------------------------------------------
 
 local PITCH_CLAMP_MIN = math.rad(-70)
 local PITCH_CLAMP_MAX = math.rad(70)
 
-local HEAD_PITCH_CLAMP_MIN = math.rad(-40)
-local HEAD_PITCH_CLAMP_MAX = math.rad(40)
-local HEAD_PITCH_MULTIPLIER = 0.6
+-- OTS position smoothing
+local CAM_SMOOTH_SPEED    = 20
 
-local SPRINT_THRESHOLD = 17
-local SPRINT_MAX_SPEED = 24
+-- OTS offsets (fallbacks if OffsetFolder values are missing)
+local DEFAULT_DISTANCE    = 5
+local DEFAULT_SIDE        = 1.8
+local DEFAULT_HEIGHT      = 1.6
+local SHOULDER_LERP_SPEED = 14
 
-local COLLISION_OFFSET = 0.3
-local FREE_LOOK_DISTANCE_MULTIPLIER = 2
+-- Sprint pull-back
+local SPRINT_DISTANCE_ADD = 1.2
+local SPRINT_THRESHOLD    = 17
+local SPRINT_MAX_SPEED    = 24
+
+-- FOV
+local BASE_FOV  = 70
+local MAX_FOV   = 80
+local FOV_SPEED = 4
+
+-- Scroll zoom
+-- Player scrolls to adjust OTS distance within [ZOOM_MIN, ZOOM_MAX].
+-- Each scroll tick moves the target by ZOOM_STEP studs.
+-- The camera lerps to the new target at ZOOM_LERP_SPEED.
+local ZOOM_MIN        = 2
+local ZOOM_MAX        = 6
+local ZOOM_STEP       = 0.6
+local ZOOM_LERP_SPEED = 10
+
+-- Collision
+local COLLISION_OFFSET = 0.25
+
+-- Free-look
+-- Camera smoothly pans from its current position to the head on entry,
+-- then the mouse drives the orbit freely — exactly like shift-lock but for
+-- looking around. No RMB required; mouse moves camera immediately.
+local FREELOOK_PAN_SPEED      = 8     -- lerp speed during pan-to-head phase
+local FREELOOK_PAN_THRESHOLD  = 0.25  -- studs: close enough = pan done
+local FREELOOK_ORBIT_DISTANCE = 5     -- studs back from head during orbit
+
+-- Debounces
 local FIRST_PERSON_DEBOUNCE = 0.2
-local SHOULDER_DEBOUNCE = 0.2
+local SHOULDER_DEBOUNCE     = 0.2
+-- Alt fires TWO InputBegan events per physical press (key + OS modifier).
+-- This debounce swallows the second so the toggle doesn't flip ON then OFF.
+local FREELOOK_DEBOUNCE     = 0.15
 
--- Free look camera offsets — tweak these to taste
-local FREE_LOOK_EXTRA_DISTANCE = 3    -- how much further back vs normal
-local FREE_LOOK_HEIGHT_REDUCTION = 1  -- how much lower the focus point sits
 
--- // Local Variables
-local BaseCamera = setmetatable({}, {__index = CameraClass})
+------------------------------------------------------------------------
+-- Module + locals
+------------------------------------------------------------------------
+
+local BaseCamera  = setmetatable({}, {__index = CameraClass})
 local LocalPlayer = PlayerService.LocalPlayer
-local Camera = Workspace.CurrentCamera
+local Camera      = Workspace.CurrentCamera
 
 local OffsetFolder =
 	ReplicatedStorage.Shared.Library.Configuration.Character_Variables.Camera.BaseCamera
 
-local PlayerData = LocalPlayer:WaitForChild("PlayerData")
+local PlayerData   = LocalPlayer:WaitForChild("PlayerData")
 local SettingsData = PlayerData:WaitForChild("Settings Data")
 local InputOptions = SettingsData:WaitForChild("Input Options")
 
 local Shoulder_Switch = InputOptions:WaitForChild("Shoulder Switch")
-local Free_Look = InputOptions:WaitForChild("Free Look")
-local First_Person = InputOptions:WaitForChild("First Person")
+local Free_Look       = InputOptions:WaitForChild("Free Look")
+local First_Person    = InputOptions:WaitForChild("First Person")
 
---------------------------------------------------
+------------------------------------------------------------------------
 -- Helpers
---------------------------------------------------
+------------------------------------------------------------------------
 
 local function getOffset(name: string, default: number): number
 	local inst = OffsetFolder:FindFirstChild(name)
-	if inst and inst:IsA("NumberValue") then
-		return inst.Value
-	end
+	if inst and inst:IsA("NumberValue") then return inst.Value end
 	return default
-end
-
-local function smooth(current: number, target: number, speed: number, dt: number): number
-	return current + (target - current) * (1 - math.exp(-speed * dt))
-end
-
-local function smoothVec(current: Vector3, target: Vector3, speed: number, dt: number): Vector3
-	local t = 1 - math.exp(-speed * dt)
-	return current:Lerp(target, t)
 end
 
 local function getKeyName(value: string): string
 	return value:gsub("Enum.KeyCode.", "")
 end
 
--- Fix: correct atan2 order for Roblox -Z forward convention
+-- Handles "Alt" / "LeftAlt" / "RightAlt" all matching each other
+local function keyMatches(pressed: string, binding: string): boolean
+	if pressed == binding then return true end
+	local altSet = { Alt = true, LeftAlt = true, RightAlt = true }
+	if altSet[pressed] and altSet[binding] then return true end
+	return false
+end
+
 local function yawFromLook(look: Vector3): number
 	return math.atan2(-look.X, -look.Z)
 end
 
---------------------------------------------------
+local function lerp(a: number, b: number, speed: number, dt: number): number
+	return a + (b - a) * (1 - math.exp(-speed * dt))
+end
+
+local function lerpVec(a: Vector3, b: Vector3, speed: number, dt: number): Vector3
+	return a:Lerp(b, 1 - math.exp(-speed * dt))
+end
+
+-- Returns the head world position, falling back gracefully
+local function getHeadPos(character: Model): Vector3
+	local head = character:FindFirstChild("Head")
+	if head and head:IsA("BasePart") then return head.Position end
+	local root = character:FindFirstChild("HumanoidRootPart")
+	return root and (root.Position + Vector3.new(0, 1.5, 0)) or Vector3.zero
+end
+
+------------------------------------------------------------------------
 -- Constructor
---------------------------------------------------
+------------------------------------------------------------------------
 
 function BaseCamera.new(cameraInfo)
 	local self = CameraClass.new(cameraInfo)
 	setmetatable(self, {__index = BaseCamera})
-
 	self.CameraPosition = Camera.CFrame.Position
-	self.CameraCFrame = Camera.CFrame
-
 	return self
 end
 
---------------------------------------------------
--- Start Camera
---------------------------------------------------
+------------------------------------------------------------------------
+-- Start
+------------------------------------------------------------------------
 
 function BaseCamera:Start()
 
-	Camera.CameraType = Enum.CameraType.Scriptable
-	LocalPlayer.CameraMode = Enum.CameraMode.Classic
-
-	InputService.MouseBehavior = Enum.MouseBehavior.LockCenter
+	Camera.CameraType             = Enum.CameraType.Scriptable
+	LocalPlayer.CameraMode        = Enum.CameraMode.Classic
+	InputService.MouseBehavior    = Enum.MouseBehavior.LockCenter
 	InputService.MouseIconEnabled = false
 
-	self.CameraYaw = 0
+	-- OTS angles
+	self.CameraYaw   = 0
 	self.CameraPitch = 0
 
-	-- Free look stores its own separate yaw/pitch so that
-	-- when the key is released we can cleanly restore to
-	-- the character-aligned camera yaw without a snap.
-	self.FreeLookYaw = 0
-	self.FreeLookPitch = 0
+	-- Free-look
+	--   IsFreeLook     : mode active flag
+	--   FreeLookPhase  : "panning"  = camera moving to head on entry
+	--                    "orbiting" = mouse freely drives the camera
+	--   FreeLookDebounce: blocks the duplicate Alt event Roblox fires
+	self.IsFreeLook      = false
+	self.FreeLookPhase   = "orbiting"
+	self.FreeLookYaw     = 0
+	self.FreeLookPitch   = 0
+	self.FreeLookDebounce = false
 
-	self.IsFreeLook = false
-	self.IsFirstPerson = false
+	-- First-person
+	self.IsFirstPerson       = false
 	self.FirstPersonDebounce = false
-	self.ShoulderDebounce = false
-	self.IsRightClickOrbit = false  -- true while RMB held during free look
 
-	self.RightShoulderOffset = getOffset("sideOffset", 3)
-	self.LeftShoulderOffset = -getOffset("sideOffset", 3)
+	-- Shoulder
+	self.RightShoulderOffset = getOffset("sideOffset", DEFAULT_SIDE)
+	self.LeftShoulderOffset  = -getOffset("sideOffset", DEFAULT_SIDE)
+	self.IsRightShoulder     = true
+	self.TargetShoulder      = self.RightShoulderOffset
+	self.CurrentShoulder     = self.TargetShoulder
+	self.ShoulderDebounce    = false
 
-	self.IsRightShoulder = true
-	self.TargetShoulder = self.RightShoulderOffset
-	self.CurrentShoulder = self.TargetShoulder
+	-- Distance (scroll-adjusted; clamped to [ZOOM_MIN, ZOOM_MAX])
+	self.BaseDistance    = getOffset("distanceBehind", DEFAULT_DISTANCE)
+	self.BaseDistance    = math.clamp(self.BaseDistance, ZOOM_MIN, ZOOM_MAX)
+	self.TargetDistance  = self.BaseDistance   -- scroll writes here
+	self.CurrentDistance = self.BaseDistance   -- lerps toward TargetDistance
 
-	self.BaseDistance = getOffset("distanceBehind", 6)
-	self.SprintDistance = getOffset("distanceSprint", 8)
+	-- FOV
+	self.CurrentFOV = BASE_FOV
 
-	self.CurrentDistance = self.BaseDistance
-	self.TargetDistance = self.BaseDistance
+	-- Smoothed camera position
+	self.SmoothedPos = Camera.CFrame.Position
 
-	self.BaseFOV = 70
-	self.MaxFOV = 80
-	self.CurrentFOV = self.BaseFOV
-
-	-- Seed yaw from current character facing so the camera
-	-- doesn't snap on first frame.
+	-- Seed from character
 	local character = LocalPlayer.Character
-	local root = character and character:FindFirstChild("HumanoidRootPart")
+	local root      = character and character:FindFirstChild("HumanoidRootPart")
 	if root then
-		self.CameraYaw = yawFromLook(root.CFrame.LookVector)
+		self.CameraYaw   = yawFromLook(root.CFrame.LookVector)
 		self.FreeLookYaw = self.CameraYaw
+		self.SmoothedPos = root.Position + Vector3.new(0, getOffset("heightOffset", DEFAULT_HEIGHT), 0)
 	end
 
-	self.RaycastParams = RaycastParams.new()
+	self.RaycastParams            = RaycastParams.new()
 	self.RaycastParams.FilterType = Enum.RaycastFilterType.Blacklist
 
 	self.Connections = {
@@ -158,331 +204,373 @@ function BaseCamera:Start()
 			self:Update(dt)
 		end),
 
+		------------------------------------------------------------------------
+		-- Keyboard input
+		------------------------------------------------------------------------
 		InputService.InputBegan:Connect(function(input, gameProcessed)
+			-- Only real keyboard events; filters OS-level / mouse / unknown
+			if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
+			if input.KeyCode.Name == "Unknown" then return end
 
+			local pressedName = input.KeyCode.Name
 			if gameProcessed then return end
 
+			local char           = LocalPlayer.Character
+			local humanoid       = char and char:FindFirstChildOfClass("Humanoid")
 			local shoulderKey    = getKeyName(Shoulder_Switch.Value)
 			local freeLookKey    = getKeyName(Free_Look.Value)
 			local firstPersonKey = getKeyName(First_Person.Value)
 
-			if input.KeyCode.Name == shoulderKey then
-
+			-- Shoulder swap
+			if keyMatches(pressedName, shoulderKey) then
 				if self.ShoulderDebounce then return end
 				self.ShoulderDebounce = true
-
-				self.IsRightShoulder = not self.IsRightShoulder
-				self.TargetShoulder =
-				self.IsRightShoulder and self.RightShoulderOffset or self.LeftShoulderOffset
-
-				character.Humanoid.AutoRotate = false
+				self.IsRightShoulder  = not self.IsRightShoulder
+				self.TargetShoulder   = self.IsRightShoulder
+				and self.RightShoulderOffset or self.LeftShoulderOffset
 				task.delay(SHOULDER_DEBOUNCE, function()
 					self.ShoulderDebounce = false
 				end)
 
-			elseif input.KeyCode.Name == freeLookKey then
+				-- Free-look toggle — one press on, one press off
+			elseif keyMatches(pressedName, freeLookKey) then
+				if self.FreeLookDebounce then
+					return
+				end
+				self.FreeLookDebounce = true
+				task.delay(FREELOOK_DEBOUNCE, function()
+					self.FreeLookDebounce = false
+				end)
 
-				-- Seed free-look angles from the current camera so
-				-- there's no jump when the key is first pressed.
-				self.FreeLookYaw   = self.CameraYaw
-				self.FreeLookPitch = self.CameraPitch
-				self.IsFreeLook    = true
+				self.IsFreeLook = not self.IsFreeLook
 
-				-- Unlock mouse so the player can look around freely
-				InputService.MouseBehavior = Enum.MouseBehavior.Default
-				InputService.MouseIconEnabled = true
+				if self.IsFreeLook then
+					-- Entering free-look:
+					-- Pan phase moves the camera smoothly to the head.
+					-- Orbit phase starts immediately after; mouse drives
+					-- the camera with no button held — just like shift-lock.
+					self.FreeLookPhase = "panning"
+					self.FreeLookYaw   = self.CameraYaw
+					self.FreeLookPitch = self.CameraPitch
+					-- Lock mouse centre so mouse delta works immediately
+					-- for when the orbit phase begins
+					InputService.MouseBehavior    = Enum.MouseBehavior.LockCenter
+					InputService.MouseIconEnabled = false
+					if humanoid then humanoid.AutoRotate = true end
+				else
+					-- Exiting free-look: re-lock to OTS
+					self.FreeLookPhase            = "orbiting"
+					InputService.MouseBehavior    = Enum.MouseBehavior.LockCenter
+					InputService.MouseIconEnabled = false
+					if humanoid then humanoid.AutoRotate = false end
+					local r = char and char:FindFirstChild("HumanoidRootPart")
+					if r then
+						self.CameraYaw = yawFromLook(r.CFrame.LookVector)
+					end
+					self.CameraPitch = 0
+				end
 
-				character.Humanoid.AutoRotate = true
-			elseif input.KeyCode.Name == firstPersonKey then
-
-				-- Debounce: ignore rapid re-presses
+				-- First-person toggle
+			elseif keyMatches(pressedName, firstPersonKey) then
 				if self.FirstPersonDebounce then return end
 				self.FirstPersonDebounce = true
-
-				self.IsFirstPerson = not self.IsFirstPerson
-				self.IsFreeLook    = false
-
-				-- Re-lock mouse in case free look was active
-				InputService.MouseBehavior = Enum.MouseBehavior.LockCenter
-				InputService.MouseIconEnabled = false
-
-				-- Re-align free look state with main yaw when toggling
-				-- first person so there's no drift.
+				self.IsFirstPerson       = not self.IsFirstPerson
+				if self.IsFreeLook then
+					self.IsFreeLook               = false
+					self.FreeLookPhase            = "orbiting"
+					InputService.MouseBehavior    = Enum.MouseBehavior.LockCenter
+					InputService.MouseIconEnabled = false
+					if humanoid then humanoid.AutoRotate = false end
+				end
 				self.FreeLookYaw   = self.CameraYaw
 				self.FreeLookPitch = self.CameraPitch
-				character.Humanoid.AutoRotate = false
-
 				task.delay(FIRST_PERSON_DEBOUNCE, function()
 					self.FirstPersonDebounce = false
 				end)
-
 			end
-
-			-- RMB orbit: only active while in free look
-			if input.UserInputType == Enum.UserInputType.MouseButton2 and self.IsFreeLook then
-				self.IsRightClickOrbit = true
-				InputService.MouseBehavior = Enum.MouseBehavior.LockCenter
-			end
-
 		end),
 
-		InputService.InputEnded:Connect(function(input, gameProcessed)
-
+		------------------------------------------------------------------------
+		-- Scroll zoom — adjusts OTS distance only (not active in free-look/FP)
+		------------------------------------------------------------------------
+		InputService.InputChanged:Connect(function(input, gameProcessed)
 			if gameProcessed then return end
+			if input.UserInputType ~= Enum.UserInputType.MouseWheel then return end
+			-- Don't zoom in free-look or first-person
+			if self.IsFreeLook or self.IsFirstPerson then return end
 
-			local freeLookKey = getKeyName(Free_Look.Value)
-
-			if input.KeyCode.Name == freeLookKey then
-
-				self.IsFreeLook        = false
-				self.IsRightClickOrbit = false
-
-				-- Re-lock the mouse now that free look is done
-				InputService.MouseBehavior = Enum.MouseBehavior.LockCenter
-				InputService.MouseIconEnabled = false
-
-				-- Snap main camera yaw back to the character's actual
-				-- facing direction so there's no lurch on release.
-				local char = LocalPlayer.Character
-				local r    = char and char:FindFirstChild("HumanoidRootPart")
-				if r then
-					self.CameraYaw = yawFromLook(r.CFrame.LookVector)
-				end
-				self.CameraPitch = 0
-
-			end
-
-			-- RMB released: restore free cursor
-			if input.UserInputType == Enum.UserInputType.MouseButton2 and self.IsFreeLook then
-				self.IsRightClickOrbit = false
-				InputService.MouseBehavior = Enum.MouseBehavior.Default
-			end
+			-- input.Position.Z is +1 (scroll up = zoom in) or -1 (scroll down = zoom out)
+			local direction  = -input.Position.Z   -- invert: scroll up = closer
+			self.TargetDistance = math.clamp(
+				self.TargetDistance + direction * ZOOM_STEP,
+				ZOOM_MIN,
+				ZOOM_MAX
+			)
 
 		end),
 
+		------------------------------------------------------------------------
+		-- Safety: exit free-look on window focus loss (e.g. Alt-Tab)
+		InputService.WindowFocusReleased:Connect(function()
+			if self.IsFreeLook then
+
+				self.IsFreeLook               = false
+				self.FreeLookPhase            = "orbiting"
+				InputService.MouseBehavior    = Enum.MouseBehavior.LockCenter
+				InputService.MouseIconEnabled = false
+				local char = LocalPlayer.Character
+				local h    = char and char:FindFirstChildOfClass("Humanoid")
+				if h then h.AutoRotate = false end
+			end
+		end),
+
+		------------------------------------------------------------------------
 		LocalPlayer.CharacterAdded:Connect(function(newCharacter)
 
 			self.IsFirstPerson       = false
 			self.IsFreeLook          = false
+			self.FreeLookPhase       = "orbiting"
+			self.FreeLookDebounce    = false
 			self.FirstPersonDebounce = false
 			self.ShoulderDebounce    = false
-			self.IsRightClickOrbit   = false
-
-			-- Always re-lock mouse on respawn
-			InputService.MouseBehavior = Enum.MouseBehavior.LockCenter
+			InputService.MouseBehavior    = Enum.MouseBehavior.LockCenter
 			InputService.MouseIconEnabled = false
-
 			local r = newCharacter:WaitForChild("HumanoidRootPart")
-
-			self.CameraYaw    = yawFromLook(r.CFrame.LookVector)
-			self.CameraPitch  = 0
-			self.FreeLookYaw  = self.CameraYaw
+			self.CameraYaw     = yawFromLook(r.CFrame.LookVector)
+			self.CameraPitch   = 0
+			self.FreeLookYaw   = self.CameraYaw
 			self.FreeLookPitch = 0
+			self.SmoothedPos   =
+				r.Position + Vector3.new(0, getOffset("heightOffset", DEFAULT_HEIGHT), 0)
 
 		end),
 	}
+
+
 end
 
---------------------------------------------------
+------------------------------------------------------------------------
 -- Update
---------------------------------------------------
+------------------------------------------------------------------------
 
-function BaseCamera:Update(dt)
+function BaseCamera:Update(dt: number)
 
 	local character = LocalPlayer.Character
 	if not character then return end
 
-	local root      = character:FindFirstChild("HumanoidRootPart")
-	local humanoid  = character:FindFirstChildOfClass("Humanoid")
-
+	local root     = character:FindFirstChild("HumanoidRootPart")
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
 	if not root or not humanoid then return end
-
 
 	self.RaycastParams.FilterDescendantsInstances = {character}
 
-	--------------------------------------------------
-	-- Mouse input — split between free-look and normal
-	--------------------------------------------------
+	local heightOffset = getOffset("heightOffset", DEFAULT_HEIGHT)
 
-	local mouseDelta = InputService:GetMouseDelta()
+	--------------------------------------------------------------------
+	-- 1. Mouse delta → angles
+	-- In free-look (orbiting phase) mouse is locked and drives the orbit.
+	-- In OTS mouse is locked and drives the OTS camera + body.
+	-- In both cases MouseBehavior is LockCenter so delta is always live.
+	--------------------------------------------------------------------
+
+	local delta       = InputService:GetMouseDelta()
 	local sensitivity = getOffset("rotationSpeed", 0.25)
 
 	if self.IsFreeLook then
-		-- Free look: only move the free-look angles, leave
-		-- CameraYaw / CameraPitch (and therefore the character) alone.
-		-- RMB held: mouse is locked so delta drives the orbit spin.
-		-- RMB not held: mouse is free-floating so delta is always zero —
-		-- the player just moves their cursor without spinning the camera.
-		if self.IsRightClickOrbit then
-			self.FreeLookYaw   += math.rad(-mouseDelta.X * sensitivity)
-			self.FreeLookPitch += math.rad(-mouseDelta.Y * sensitivity)
+		-- During panning we discard mouse input so the pan plays cleanly.
+		-- Once orbiting, mouse drives the free-look angles directly.
+		if self.FreeLookPhase == "orbiting" then
+			self.FreeLookYaw   += math.rad(-delta.X * sensitivity)
+			self.FreeLookPitch += math.rad(-delta.Y * sensitivity)
 			self.FreeLookPitch  = math.clamp(self.FreeLookPitch, PITCH_CLAMP_MIN, PITCH_CLAMP_MAX)
 		end
-		-- When not right-clicking we intentionally do nothing with mouseDelta
-		-- so the camera stays frozen while the cursor roams freely.
-
 		humanoid.AutoRotate = true
 	else
 		humanoid.AutoRotate = false
-		-- Normal: drive the main camera angles.
-		self.CameraYaw   += math.rad(-mouseDelta.X * sensitivity)
-		self.CameraPitch += math.rad(-mouseDelta.Y * sensitivity)
+		self.CameraYaw   += math.rad(-delta.X * sensitivity)
+		self.CameraPitch += math.rad(-delta.Y * sensitivity)
 		self.CameraPitch  = math.clamp(self.CameraPitch, PITCH_CLAMP_MIN, PITCH_CLAMP_MAX)
-
-		-- Keep free-look in sync so it doesn't jump when first pressed.
+		-- Keep free-look angles in sync so toggling never causes a jump
 		self.FreeLookYaw   = self.CameraYaw
 		self.FreeLookPitch = self.CameraPitch
 	end
 
-	-- Which angles drive the camera this frame
 	local activeYaw   = self.IsFreeLook and self.FreeLookYaw   or self.CameraYaw
 	local activePitch = self.IsFreeLook and self.FreeLookPitch or self.CameraPitch
 
-	--------------------------------------------------
-	-- Smooth shoulder / distance
-	--------------------------------------------------
+	--------------------------------------------------------------------
+	-- 2. Character body rotation (OTS only)
+	--------------------------------------------------------------------
 
-	self.CurrentShoulder = smooth(
-		self.CurrentShoulder,
-		self.TargetShoulder,
-		SHOULDER_SMOOTH_SPEED,
-		dt
-	)
-
-	self.CurrentDistance = smooth(
-		self.CurrentDistance,
-		self.TargetDistance,
-		DISTANCE_SMOOTH_SPEED,
-		dt
-	)
-
-	--------------------------------------------------
-	-- Rotate Character (OVER-THE-SHOULDER)
-	-- Skipped during free-look so the body stays still,
-	-- and skipped in first person (body faces camera directly).
-	--------------------------------------------------
-
-	if not self.IsFreeLook then
-
-		local currentLook = root.CFrame.LookVector
-		local currentYaw  = yawFromLook(currentLook)
-
-		local deltaYaw = math.atan2(
-			math.sin(self.CameraYaw - currentYaw),
-			math.cos(self.CameraYaw - currentYaw)
+	if not self.IsFreeLook and not self.IsFirstPerson then
+		local curYaw = yawFromLook(root.CFrame.LookVector)
+		local diff   = math.atan2(
+			math.sin(self.CameraYaw - curYaw),
+			math.cos(self.CameraYaw - curYaw)
 		)
-
 		local turnSpeed = getOffset("characterTurnSpeed", 12)
-		local step      = deltaYaw * math.clamp(turnSpeed * dt, 0, 1)
-
-		root.CFrame =
-			CFrame.new(root.Position)
-			* CFrame.Angles(0, currentYaw + step, 0)
-
+		local step      = diff * math.clamp(turnSpeed * dt, 0, 1)
+		root.CFrame = CFrame.new(root.Position) * CFrame.Angles(0, curYaw + step, 0)
 	end
 
-	--------------------------------------------------
-	-- First-person: hide / show character meshes.
-	--------------------------------------------------
+	--------------------------------------------------------------------
+	-- 3. Shoulder lerp
+	--------------------------------------------------------------------
 
-	-- Hide body parts in first person so the mesh doesn't clip the camera.
+	self.CurrentShoulder = lerp(
+		self.CurrentShoulder, self.TargetShoulder, SHOULDER_LERP_SPEED, dt
+	)
+
+	--------------------------------------------------------------------
+	-- 4. Distance (scroll zoom) & FOV
+	-- Sprint temporarily increases distance on top of the scroll offset.
+	-- We lerp CurrentDistance toward a composite target each frame.
+	--------------------------------------------------------------------
+
+	local speed   = root.AssemblyLinearVelocity.Magnitude
+	local moving  = humanoid.MoveDirection.Magnitude > 0.1
+	local sprintT = math.clamp(
+		(speed - SPRINT_THRESHOLD) / math.max(SPRINT_MAX_SPEED - SPRINT_THRESHOLD, 0.001),
+		0, 1
+	)
+
+	-- Sprint nudges the distance beyond the scroll target, but never past ZOOM_MAX
+	local sprintAdd  = moving and sprintT * SPRINT_DISTANCE_ADD or 0
+	local targetDist = math.clamp(self.TargetDistance + sprintAdd, ZOOM_MIN, ZOOM_MAX)
+	self.CurrentDistance = lerp(self.CurrentDistance, targetDist, ZOOM_LERP_SPEED, dt)
+
+	local targetFOV = BASE_FOV + (moving and sprintT * (MAX_FOV - BASE_FOV) or 0)
+	self.CurrentFOV = lerp(self.CurrentFOV, targetFOV, FOV_SPEED, dt)
+	Camera.FieldOfView = self.CurrentFOV
+
+	--------------------------------------------------------------------
+	-- 5. First-person mesh visibility
+	--------------------------------------------------------------------
+
 	for _, desc in ipairs(character:GetDescendants()) do
-		if desc:IsA("BasePart") or desc:IsA("Decal") then
-			if desc.Name ~= "HumanoidRootPart" then
-				desc.LocalTransparencyModifier = self.IsFirstPerson and 1 or 0
-			end
+		if (desc:IsA("BasePart") or desc:IsA("Decal")) and desc.Name ~= "HumanoidRootPart" then
+			desc.LocalTransparencyModifier = self.IsFirstPerson and 1 or 0
 		end
 	end
 
-	--------------------------------------------------
-	-- Camera positioning
-	--------------------------------------------------
+	--------------------------------------------------------------------
+	-- 6. Rotation CFrame
+	--------------------------------------------------------------------
 
 	local rotation =
 		CFrame.Angles(0, activeYaw, 0)
 		* CFrame.Angles(activePitch, 0, 0)
 
-	local heightOffset = getOffset("heightOffset", 2)
-	local focusPoint   = root.Position + Vector3.new(0, heightOffset, 0)
+	local focusPoint = root.Position + Vector3.new(0, heightOffset, 0)
 
-	local desiredPos
+	--------------------------------------------------------------------
+	-- 7. Desired camera position
+	--------------------------------------------------------------------
+
+	local desiredPos: Vector3
 
 	if self.IsFirstPerson then
-		-- Place camera at the head position directly
-		local head = character:FindFirstChild("Head")
-		local headPos = head and head.Position or (root.Position + Vector3.new(0, 1.5, 0))
-		desiredPos = headPos
+		--------------------------------------------------------------------
+		-- First-person: camera at head
+		--------------------------------------------------------------------
+		desiredPos = getHeadPos(character)
+
 	elseif self.IsFreeLook then
-		-- Free look: orbit around the centre of the player, pulled back
-		-- further and sitting slightly lower than normal OTS.
-		local freeLookFocus =
-			root.Position + Vector3.new(0, heightOffset - FREE_LOOK_HEIGHT_REDUCTION, 0)
-		desiredPos =
-			freeLookFocus
-			- rotation.LookVector * (self.CurrentDistance + FREE_LOOK_EXTRA_DISTANCE)
+
+		-- Get the head position this frame (tracks the character while orbiting)
+		local headPos = getHeadPos(character)
+
+		if self.FreeLookPhase == "panning" then
+			--------------------------------------------------------------------
+			-- Phase 1 — Pan: lerp SmoothedPos toward head.
+			-- We move SmoothedPos directly here; desiredPos is set to SmoothedPos
+			-- so the smooth step below is a no-op (we're doing our own lerp).
+			-- This avoids the double-lerp that was pushing the camera into the head.
+			--------------------------------------------------------------------
+			self.SmoothedPos = lerpVec(self.SmoothedPos, headPos, FREELOOK_PAN_SPEED, dt)
+
+			local dist = (self.SmoothedPos - headPos).Magnitude
+			if dist < FREELOOK_PAN_THRESHOLD then
+				-- Pan complete — snap exactly to head and switch to orbit
+				self.SmoothedPos   = headPos
+				self.FreeLookPhase = "orbiting"
+				self.FreeLookYaw   = activeYaw
+				self.FreeLookPitch = activePitch
+
+			end
+
+			-- Set Camera directly and return — skip collision + smooth steps
+			Camera.CFrame =
+				CFrame.new(self.SmoothedPos)
+				* CFrame.Angles(0, activeYaw, 0)
+				* CFrame.Angles(activePitch, 0, 0)
+			return
+
+		else
+			--------------------------------------------------------------------
+			-- Phase 2 — Orbit: camera sits FREELOOK_ORBIT_DISTANCE studs behind
+			-- the head. Head is centred on screen. Mouse drives yaw/pitch freely.
+			--------------------------------------------------------------------
+			desiredPos = headPos - rotation.LookVector * FREELOOK_ORBIT_DISTANCE
+		end
+
 	else
+		--------------------------------------------------------------------
+		-- Standard OTS
+		--------------------------------------------------------------------
 		desiredPos =
 			focusPoint
 			+ rotation.RightVector * self.CurrentShoulder
-			- rotation.LookVector  * self.CurrentDistance
+		- rotation.LookVector  * self.CurrentDistance
 	end
 
-	-- Collision check: only cast when not in first person
-	local finalPos = desiredPos
+	--------------------------------------------------------------------
+	-- 8. Collision
+	-- Cast from focusPoint in OTS, from headPos in free-look orbit.
+	--------------------------------------------------------------------
+
+	local finalPos  = desiredPos
+	local rayOrigin = focusPoint
+
+	if self.IsFreeLook and self.FreeLookPhase == "orbiting" then
+		rayOrigin = getHeadPos(character)
+	end
 
 	if not self.IsFirstPerson then
-		local origin    = self.IsFreeLook
-			and (root.Position + Vector3.new(0, heightOffset - FREE_LOOK_HEIGHT_REDUCTION, 0))
-			or  focusPoint
-		local direction = desiredPos - origin
-		local ray       = Workspace:Raycast(origin, direction, self.RaycastParams)
+		local ray = Workspace:Raycast(rayOrigin, desiredPos - rayOrigin, self.RaycastParams)
 		if ray then
 			finalPos = ray.Position + ray.Normal * COLLISION_OFFSET
 		end
 	end
 
-	-- Smooth the camera position with a proper Vector3 lerp
-	self.CameraPosition = smoothVec(
-		self.CameraPosition or finalPos,
-		finalPos,
-		CAMERA_SMOOTH_SPEED,
-		dt
-	)
+	--------------------------------------------------------------------
+	-- 9. Smooth position + apply CFrame
+	--------------------------------------------------------------------
+
+	self.SmoothedPos = lerpVec(self.SmoothedPos, finalPos, CAM_SMOOTH_SPEED, dt)
 
 	Camera.CFrame =
-		CFrame.new(self.CameraPosition)
-		* rotation
-
-	--------------------------------------------------
-	-- FOV
-	--------------------------------------------------
-
-	local targetFOV = self.BaseFOV
-
-	if humanoid.MoveDirection.Magnitude > 0.1 then
-		local speed     = root.AssemblyLinearVelocity.Magnitude
-		local sprintT   = math.clamp((speed - SPRINT_THRESHOLD) / (SPRINT_MAX_SPEED - SPRINT_THRESHOLD), 0, 1)
-		targetFOV       = self.BaseFOV + (self.MaxFOV - self.BaseFOV) * sprintT
-	end
-
-	local fovSpeed = targetFOV > self.CurrentFOV and FOV_INCREASE_SPEED or FOV_DECREASE_SPEED
-	self.CurrentFOV = smooth(self.CurrentFOV, targetFOV, fovSpeed, dt)
-	Camera.FieldOfView = self.CurrentFOV
+		CFrame.new(self.SmoothedPos)
+		* CFrame.Angles(0, activeYaw, 0)
+		* CFrame.Angles(activePitch, 0, 0)
 
 end
 
---------------------------------------------------
+------------------------------------------------------------------------
 -- Init
---------------------------------------------------
+------------------------------------------------------------------------
+
+
 
 local myCameraInfo = {
-	name       = "BasicCamera",
-	priority   = 1,
+	name        = "BasicCamera",
+	priority    = 1,
 	Connections = {},
 }
 
 local myCamera = BaseCamera.new(myCameraInfo)
-
 myCamera:Start()
+
+
 
 return myCamera

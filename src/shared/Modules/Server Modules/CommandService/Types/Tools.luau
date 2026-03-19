@@ -9,13 +9,13 @@ local function getClasses()
 	local list = {}
 
 	for _, child in ipairs(ToolClasses:GetChildren()) do
-		if child:IsA("ModuleScript") then
+		if child:IsA("ModuleScript") and not child:GetAttribute("UnListAble") then
 			table.insert(list, child.Name)
 		end
 	end
 
 	for _, child in ipairs(GunClasses:GetChildren()) do
-		if child:IsA("ModuleScript") then
+		if child:IsA("ModuleScript") and not child:GetAttribute("UnListAble") then
 			table.insert(list, child.Name)
 		end
 	end

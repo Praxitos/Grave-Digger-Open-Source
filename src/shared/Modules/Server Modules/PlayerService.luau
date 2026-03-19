@@ -35,6 +35,18 @@ local function setup_characterdata(character: Model)
 	Holster_Folder.Parent = folder
 end
 
+local function fetch_hair_accessories(player: Player)
+	local humanoidDescription: HumanoidDescription = Players:GetHumanoidDescriptionFromUserIdAsync(player.UserId)
+
+	local accessories = humanoidDescription:GetAccessories(true) -- true includes rigid accessories
+	
+	-- // get only hair accessories
+	for _, accessory:Accessory in pairs(accessories) do
+		if not accessory.AccessoryType.Name:find("Hair") then continue end
+		print("Asset ID: " .. accessory.AssetId)
+	end
+end
+
 local function setup_player(player: Player)
 	setup_gamedata(player)
 
@@ -42,6 +54,7 @@ local function setup_player(player: Player)
 		setup_characterdata(player.Character)
 	end)
 
+	fetch_hair_accessories(player)
 	print("PlayerService: Set up player", player.Name)
 end
 
