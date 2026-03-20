@@ -9,6 +9,9 @@ local Types = require(script.Parent.Parent.Parent.Types)
 local BaseTool = require(script.Parent.BaseTool)
 
 local Holster_Folder = ReplicatedStorage.Shared.Assets.Holsters:FindFirstChild("Tool Holsters")
+local Tool_Folder = ReplicatedStorage.Shared.Assets.ToolModels
+local Animations_Folder = ReplicatedStorage.Shared.Assets.Animations
+
 local utilities_module = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Library"):WaitForChild("Util"))
 local delete_terrain: RemoteEvent = ReplicatedStorage.Shared.Library.Events.Terrain_Communication.Delete_Terrain
 
@@ -27,6 +30,16 @@ export type Pickaxe = typeof(setmetatable({} :: {
 	actual_holster: Model?,
 	tool: Tool?,
 	mining_power: number,
+	model_reference: Model?,
+	actual_model: Model?,
+	motor_6d_data: {
+		Parent: string,
+		Part0: string,
+		Part1: string,
+		C0: CFrame
+	},
+	animations: {[string]: Animation},
+	RegisteredAnimations: {[string]: AnimationTrack}?,
 
 	_activationConnection: RBXScriptConnection?
 }, {} :: typeof(Pickaxe)))
@@ -41,20 +54,41 @@ function Pickaxe.new(PickaxeCreateInfo: Types.BaseToolCreateInfo): Pickaxe
 	self.holster_reference = Holster_Folder and Holster_Folder:FindFirstChild("PickaxeHolster")
 	self.actual_holster = nil
 
-	self.mining_power = 6 -- FIXED: number, not string
+	self.model_reference = Tool_Folder:FindFirstChild("Pickaxe")
+	self.actual_model = nil
 
+	self.motor_6d_data = {
+		Parent = "Right Arm",
+		Part0 = "Right Arm",
+		Part1 = self.model_reference.Pickaxe_Middle,
+		C0 = CFrame.new(-0.184, -0.939, 0.183) * CFrame.Angles(0.005, math.rad(-90), math.rad(90))
+	}
+
+	self.animations = {
+		Draw = Animations_Folder.Tools.Pickaxes.Pickaxe_Draw,
+		Hold = Animations_Folder.Tools.Pickaxes.Pickaxe_Hold,
+		Melee1 = Animations_Folder.Tools.Pickaxes.Pickaxe_Melee1,
+		Melee2 = Animations_Folder.Tools.Pickaxes.Pickaxe_Melee2,
+		Mine = Animations_Folder.Tools.Pickaxes.Pickaxe_Mine,
+		Unequip = Animations_Folder.Tools.Pickaxes.Pickaxe_Unequip
+	}
+
+	self.mining_power = 6
 	self._activationConnection = nil
 
 	return self
 end
 
--- called when the item enters the inventory
-function Pickaxe:on_give(tool: Tool, holster: Model?)
+function Pickaxe:on_give(tool: Tool, holster: Model?, model: Model?)
 	BaseTool.on_give(self, tool, holster)
 
 	self.tool = tool
 
-	-- Prefer passed holster, fallback to search
+	self.RegisteredAnimations = utilities_module.register_animations(LOCAL_PLAYER, self.animations)
+	if not self.RegisteredAnimations then
+		warn("[Pickaxe] Failed to register animations")
+	end
+
 	if holster then
 		self.actual_holster = holster
 	elseif self.holster_reference then
@@ -66,9 +100,6 @@ function Pickaxe:on_give(tool: Tool, holster: Model?)
 		warn("[Pickaxe] Missing holster_reference")
 	end
 
-	print("Pickaxe holster set to:", self.actual_holster)
-
-	-- Prevent connection stacking
 	if self._activationConnection then
 		self._activationConnection:Disconnect()
 	end
@@ -78,42 +109,52 @@ function Pickaxe:on_give(tool: Tool, holster: Model?)
 	end)
 end
 
--- called by your custom inventory system
 function Pickaxe:equip()
 	if not self.tool then return end
 
 	local character = LOCAL_PLAYER.Character
 	if not character then return end
 
-	character.Humanoid:EquipTool(self.tool)
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	if not humanoid then return end
+
+	humanoid:EquipTool(self.tool)
+
+	if self.RegisteredAnimations then
+		local draw = self.RegisteredAnimations.Draw
+		local hold = self.RegisteredAnimations.Hold
+
+		if draw then draw:Play() end
+		if hold then hold:Play() end
+	end
 
 	if self.actual_holster then
 		utilities_module.hide_holster(LOCAL_PLAYER, self.actual_holster)
 	end
-
-	print("Pickaxe equipped")
 end
 
 function Pickaxe:unequip()
 	if not self.tool then return end
 
-	local backpack = LOCAL_PLAYER:FindFirstChildOfClass("Backpack")
-	if not backpack then return end
-
 	local character = LOCAL_PLAYER.Character
 	if not character then return end
 
-	character.Humanoid:UnequipTools()
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	if not humanoid then return end
 
-	if self.actual_holster then
-		utilities_module.show_holster(LOCAL_PLAYER, self.actual_holster)
+	self.RegisteredAnimations.Unequip:Play()
+
+	humanoid:UnequipTools()
+
+	self.RegisteredAnimations.Unequip.Stopped:Wait()
+	for _, animation in pairs(self.RegisteredAnimations) do
+		animation:Stop()
 	end
-
-	print("Pickaxe unequipped")
 end
 
 function Pickaxe:activate()
-	if not LOCAL_PLAYER.Character then return end
+	local character = LOCAL_PLAYER.Character
+	if not character then return end
 
 	local camera = workspace.CurrentCamera
 	if not camera then return end
@@ -128,15 +169,18 @@ function Pickaxe:activate()
 		{ workspace.Terrain }
 	)
 
+	if self.RegisteredAnimations then
+		local index = math.random(1, 2)
+		local anim = self.RegisteredAnimations["Melee" .. index]
+		if anim then
+			anim:Play()
+		end
+	end
+
 	if not raycast then return end
 
 	if raycast.Instance == workspace.Terrain and raycast.Material == Enum.Material.Rock then
-		print("Terrain hit at:", raycast.Position)
-
-		-- NOTE: Server should validate this
 		delete_terrain:FireServer(raycast.Position, self.mining_power)
-	else
-		print("No valid terrain hit")
 	end
 end
 

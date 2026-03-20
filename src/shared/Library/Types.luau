@@ -13,12 +13,24 @@ export type CameraClassCreateInfo = {
 };
 
 export type BaseGunCreateInfo = {
-    name : string;
+	name : string;
+	descrption : string;
+	lore : string,
+	item_image: string,
+	
+	damage: number,
+	range: number,
+	range_damage: number,
+	
+	animations : {
+		animation_name : string,
+	},
+	
 };
 
 export type BaseToolCreateInfo = {
     name : string;
-    item_image: string;
+	item_image: string;
     on_give: () -> ();
     on_equip: () -> ();
     on_activation: () -> ();

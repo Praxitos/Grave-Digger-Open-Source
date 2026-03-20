@@ -1,0 +1,17 @@
+{
+  "className": "MeshPart",
+  "properties": {
+    "CFrame": [-5.596, 380.2453, -33.5892, 0.0, 1, 0, 0.9963, -0.0, 0.0857, 0.0857, 0, -0.9963],
+    "CanCollide": false,
+    "CanQuery": false,
+    "CanTouch": false,
+    "Color": [202, 203, 209],
+    "InitialSize": [37.9962, 7.5992, 37.9962],
+    "Locked": true,
+    "Massless": true,
+    "Material": "Metal",
+    "MeshContent": "rbxassetid://16335287220",
+    "RenderFidelity": "Precise",
+    "Size": [0.0615, 0.0591, 0.0615]
+  }
+}

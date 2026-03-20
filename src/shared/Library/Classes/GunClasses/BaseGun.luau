@@ -11,7 +11,8 @@ local Types = require(script.Parent.Parent.Parent.Types);
 --[=[
 	@class BaseGun
 
-	The BaseGun class is the primary GunClass
+	The BaseGun class is the primary 
+	GunClass
 ]=]
 local BaseGun = {};
 BaseGun.__index = BaseGun;

@@ -3,6 +3,9 @@ local module = {}
 
 local Players = game:GetService("Players")
 
+local Animations_Folder = game:GetService("ReplicatedStorage").Shared.Assets.Animations.Character.Walking.Standing.Walk_Forward
+
+
 local function setup_gamedata(player: Player)
 	local player_data_folder = Instance.new("Folder")
 	player_data_folder.Name = "GameData"
@@ -33,25 +36,35 @@ local function setup_characterdata(character: Model)
 	local Holster_Folder = Instance.new("Folder")
 	Holster_Folder.Name = "Rendered_Holsters"
 	Holster_Folder.Parent = folder
+	
+	local Equipment_Folder = Instance.new("Folder")
+	Equipment_Folder.Name = "Equipment"
+	Equipment_Folder.Parent = folder
 end
 
 local function fetch_hair_accessories(player: Player)
 	local humanoidDescription: HumanoidDescription = Players:GetHumanoidDescriptionFromUserIdAsync(player.UserId)
 
 	local accessories = humanoidDescription:GetAccessories(true) -- true includes rigid accessories
-	
+
 	-- // get only hair accessories
-	for _, accessory:Accessory in pairs(accessories) do
+	for _, accessory:AccessoriesInfo in pairs(accessories) do
 		if not accessory.AccessoryType.Name:find("Hair") then continue end
 		print("Asset ID: " .. accessory.AssetId)
+
+		local string_value = Instance.new("StringValue")
+		string_value.Parent = player.GameData.Accessorys.Hairs
+		string_value.Name = "Hair" .. #player.GameData.Accessorys.Hairs:GetChildren()
+		string_value.Value = accessory.AssetId
 	end
 end
+
 
 local function setup_player(player: Player)
 	setup_gamedata(player)
 
-	player.CharacterAdded:Connect(function()
-		setup_characterdata(player.Character)
+	player.CharacterAdded:Connect(function(character)
+		setup_characterdata(character)
 	end)
 
 	fetch_hair_accessories(player)
@@ -67,6 +80,8 @@ function module.start_module()
 	Players.PlayerAdded:Connect(function(player: Player)
 		setup_player(player)
 	end)
+	
+	print("Ran playersetup...")
 end
 
 return module

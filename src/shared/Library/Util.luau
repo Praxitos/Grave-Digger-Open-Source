@@ -117,5 +117,57 @@ function Util.GetNames(list)
 	return names
 end
 
+function Util.register_animations(player: Player, animations_table: table)
+	local character = player.Character
+	if not character then
+		warn("register_animations: Character not found for", player.Name)
+		return nil
+	end
+
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	if not humanoid then
+		warn("register_animations: Humanoid not found for", player.Name)
+		return nil
+	end
+
+	local animator: Animator = humanoid:FindFirstChildOfClass("Animator")
+	
+	if not animator then
+		warn("register_animations: Animator not found, creating one for", player.Name)
+		animator = Instance.new("Animator")
+		animator.Parent = humanoid
+	end
+
+	local Animations = {}
+
+	for name, anim in pairs(animations_table) do
+		--  Type safety check
+		if typeof(anim) ~= "Instance" or not anim:IsA("Animation") then
+			warn("Invalid animation for key:", name, "| Expected Animation, got:", typeof(anim))
+			continue
+		end
+
+		-- Asset ID check
+		if not anim.AnimationId or anim.AnimationId == "" then
+			warn("Animation missing AnimationId:", name)
+			continue
+		end
+
+		--  Safe load
+		local success, loadedAnim = pcall(function()
+			return animator:LoadAnimation(anim)
+		end)
+
+		if success and loadedAnim then
+			Animations[name] = loadedAnim
+		else
+			warn("Failed to load animation:", name, loadedAnim)
+		end
+	end
+
+	return Animations
+end
+
+
 return Util
 

@@ -35,12 +35,64 @@ function module.give_item(player: Player, item: string)
     if object.holster_reference then
         print("Has Holster", object)
 
-        local string_value = Instance.new("StringValue")
+        local string_value = Instance.new("BoolValue")
         string_value.Name = object.holster_reference.Name
-        string_value.Parent = player.GameData.Accessorys.Holsters
+		string_value.Parent = player.GameData.Accessorys.Holsters
+		string_value.Value = true		
+				
+		tool.Equipped:Connect(function()
+			string_value.Value = false
+
+			if object.model_reference then
+				local clone = object.model_reference:Clone()
+				clone.Parent = player.Character.CharacterData.Equipment
+				object.actual_model = clone
+
+				print("Cloned ModelReference")
+
+				local character = player.Character
+
+				-- Resolve Part0 safely (supports fallback)
+				local part0 = character:FindFirstChild(object.motor_6d_data.Part0)
+					or character:FindFirstChild(object.motor_6d_data.Parent)
+
+				if not part0 then
+					warn("Could not find Part0:", object.motor_6d_data.Part0)
+					return
+				end
+
+				-- Resolve Part1 from cloned model
+				local part1 = clone:FindFirstChild(object.motor_6d_data.Part1.Name, true)
+
+				if not part1 then
+					warn("Could not find Part1 in model:", object.motor_6d_data.Part1)
+					return
+				end
+
+				local motor6d: Motor6D = Instance.new("Motor6D")
+				motor6d.Name = "ToolMotor"
+				motor6d.Parent = part0
+
+				motor6d.Part0 = part0
+				motor6d.Part1 = part1
+				motor6d.C0 = object.motor_6d_data.C0
+
+				print("Created Motor6D:", part0.Name, "->", part1.Name)
+			end
+		end)
+		
+		tool.Unequipped:Connect(function()
+			string_value.Value = true
+			
+			player.Character.CharacterData.Equipment:FindFirstChild(object.model_reference.Name):Destroy()
+		end)
     else
         print("No Holster.", object)
-    end
+	end
+	
+	if object.model_reference then
+		print("Has model reference")
+	end
 
     return "Successfully gave item."
 end

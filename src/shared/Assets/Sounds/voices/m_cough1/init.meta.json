@@ -1,0 +1,8 @@
+{
+  "className": "Sound",
+  "properties": {
+    "AudioContent": "rbxassetid://18623867462",
+    "RollOffMaxDistance": 200,
+    "Volume": 0.75
+  }
+}
