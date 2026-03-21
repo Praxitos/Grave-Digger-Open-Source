@@ -170,6 +170,7 @@ function Pickaxe:activate()
 		nil,
 		{ workspace.Terrain }
 	)
+	print("Sent raycast")
 
 	if self.RegisteredAnimations then
 		local index = math.random(1, 2)
@@ -179,15 +180,24 @@ function Pickaxe:activate()
 		end
 	end
 
-	if not raycast then return end
+	if not raycast then print("Return raycast") return end
 
 	if raycast.Instance == workspace.Terrain and raycast.Material == Enum.Material.Rock then
+		print("Hit rock")
 		delete_terrain:FireServer(raycast.Position, self.mining_power)
 		local small_rocks_clone = small_rocks:Clone()
-		small_rocks_clone.Parent = raycast.Position
+		small_rocks_clone.Position = raycast.Position
+		small_rocks_clone.Parent = workspace
 		
 		utilities_module.emit_part(small_rocks_clone)
 		small_rocks_clone:Destroy()
+		print("sent rock")
+	else
+		if raycast.Material == Enum.Material.Basalt then
+			warn("Hit basalt")
+		end
+		
+		print("Failed rock sent")
 	end
 end
 
