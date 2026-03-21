@@ -1,0 +1,16 @@
+{
+  "className": "MeshPart",
+  "properties": {
+    "CFrame": [-27.2363, 3.3086, 8.4381, 0, 0, 1, 0, 1, 0, -1, 0, 0],
+    "CanCollide": false,
+    "CanQuery": false,
+    "CanTouch": false,
+    "Color": [27, 42, 53],
+    "InitialSize": [0.7826, 19.8051, 1.7915],
+    "Locked": true,
+    "Material": "Sand",
+    "MeshContent": "rbxassetid://17608588995",
+    "RenderFidelity": "Precise",
+    "Size": [0.204, 4.3213, 0.4665]
+  }
+}

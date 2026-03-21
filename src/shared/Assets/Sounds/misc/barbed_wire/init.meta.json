@@ -1,0 +1,8 @@
+{
+  "className": "Sound",
+  "properties": {
+    "AudioContent": "rbxassetid://126737693578623",
+    "Looped": true,
+    "Volume": 0.2
+  }
+}

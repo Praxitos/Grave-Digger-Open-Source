@@ -1,0 +1,7 @@
+{
+  "className": "Pose",
+  "properties": {
+    "EasingDirection": "Out",
+    "Weight": 0
+  }
+}

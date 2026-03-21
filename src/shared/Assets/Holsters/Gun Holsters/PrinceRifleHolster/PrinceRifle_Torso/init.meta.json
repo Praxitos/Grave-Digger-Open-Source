@@ -1,0 +1,19 @@
+{
+  "className": "Part",
+  "properties": {
+    "AudioCanCollide": false,
+    "CFrame": [-5.1086, 380.9557, -32.6843, 0.0, -0.0, -1, 0.0, 1.0, -0.0, 1, -0.0, 0.0],
+    "CollisionGroup": "EmpireCollision",
+    "CollisionGroupId": -1,
+    "Color": [255, 204, 153],
+    "FormFactor": "Symmetric",
+    "LeftParamA": 0,
+    "LeftParamB": 0,
+    "LeftSurface": "Weld",
+    "RightParamA": 0,
+    "RightParamB": 0,
+    "RightSurface": "Weld",
+    "Size": [2, 2, 1],
+    "Transparency": 1
+  }
+}

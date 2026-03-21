@@ -1,0 +1,7 @@
+{
+  "className": "Pose",
+  "properties": {
+    "CFrame": [0, 0, 0, 0.8746, -0.4849, 0, 0.4849, 0.8746, 0, 0, 0, 1],
+    "EasingDirection": "Out"
+  }
+}

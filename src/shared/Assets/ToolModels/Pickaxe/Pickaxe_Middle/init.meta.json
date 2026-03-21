@@ -1,0 +1,13 @@
+{
+  "className": "Part",
+  "properties": {
+    "BottomSurface": "Smooth",
+    "CFrame": [-39.222, 4.6042, 4.436, -1, 0, 0, 0, 1, 0, 0, 0, -1],
+    "CanCollide": false,
+    "CanQuery": false,
+    "Locked": true,
+    "Size": [0.386, 2.694, 0.2287],
+    "TopSurface": "Smooth",
+    "Transparency": 1
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "className": "MeshPart",
+  "properties": {
+    "CFrame": [-27.2363, 3.4645, 8.4381, 0, 0, 1, 0, 1, 0, -1, 0, 0],
+    "CanCollide": false,
+    "CanQuery": false,
+    "CanTouch": false,
+    "Color": [86, 66, 54],
+    "InitialSize": [0.7826, 19.8051, 1.7915],
+    "Locked": true,
+    "Material": "Wood",
+    "MeshContent": "rbxassetid://17608588995",
+    "RenderFidelity": "Precise",
+    "Size": [0.1948, 4.9289, 0.4458]
+  }
+}
