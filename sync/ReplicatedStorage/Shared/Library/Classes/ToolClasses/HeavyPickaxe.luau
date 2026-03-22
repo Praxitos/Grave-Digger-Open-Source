@@ -33,7 +33,7 @@ export type HeavyPickaxe = typeof(setmetatable({} :: {
 function HeavyPickaxe.new(PickaxeCreateInfo: Types.BaseToolCreateInfo): HeavyPickaxe
 	local self = setmetatable(PickaxeBase.new(PickaxeCreateInfo), HeavyPickaxe)
 	self.className = "HeavyPickaxe"
-	self.item_image = "rbxassetid://127069712406722" 
+	self.item_image = "rbxassetid://17496049481" 
 	self.Designation = "Mining"
 
 	self.holster_reference = Holster_Folder and Holster_Folder:FindFirstChild("HeavyPickaxeHolster")

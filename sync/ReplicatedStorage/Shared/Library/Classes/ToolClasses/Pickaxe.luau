@@ -50,7 +50,7 @@ function Pickaxe.new(PickaxeCreateInfo: Types.BaseToolCreateInfo): Pickaxe
 	local self = setmetatable(BaseTool.new(PickaxeCreateInfo), Pickaxe)
 
 	self.className = "Pickaxe"
-	self.item_image = "rbxassetid://127069712406722"
+	self.item_image = "rbxassetid://17496049481"
 	self.Designation = "Mining"
 
 	self.holster_reference = Holster_Folder and Holster_Folder:FindFirstChild("PickaxeHolster")

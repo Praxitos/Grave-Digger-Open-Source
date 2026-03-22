@@ -45,7 +45,7 @@ function PrinceRifle.new(info: Types.BaseToolCreateInfo): PrinceRifle
 
 	self.className = "PrinceRifle"
 
-	self.item_image = "rbxassetid://127069712406722"
+	self.item_image = "rbxassetid://17496049645"
 	self.Designation = "Primary"
 
 	self.holster_reference =

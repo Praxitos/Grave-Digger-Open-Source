@@ -1,36 +1,195 @@
+--!strict
 local module = {}
 
 local player = game.Players.LocalPlayer
 
-local UIS = game:GetService("UserInputService")
+local UIS           = game:GetService("UserInputService")
+local tween_service = game:GetService("TweenService")
 
-local player_gui = player.PlayerGui
+local player_gui   = player.PlayerGui
 local inventory_ui = player_gui:WaitForChild("Inventory")
-local main_frame = inventory_ui:WaitForChild("Main")
+local main_frame   = inventory_ui:WaitForChild("Main")
 local example_frame = main_frame.Example
 
-local empty_icon = "rbxassetid://87184018440060"
+local empty_icon = "rbxassetid://112388032303745"
+
+local TWEEN_INFO  = TweenInfo.new(0.1, Enum.EasingStyle.Quad, Enum.EasingDirection.InOut)
+local FADE_DELAY  = 3
 
 local InventorySlots = {
 	["1"] = {Keybind = Enum.KeyCode.One,   Tool = nil, UI = nil, Designation = "Primary",      PermanentUISpot = true},
 	["2"] = {Keybind = Enum.KeyCode.Two,   Tool = nil, UI = nil, Designation = "Secondary",    PermanentUISpot = true},
 	["3"] = {Keybind = Enum.KeyCode.Three, Tool = nil, UI = nil, Designation = "Melee",        PermanentUISpot = true},
 	["4"] = {Keybind = Enum.KeyCode.Four,  Tool = nil, UI = nil, Designation = "Mining",       PermanentUISpot = true},
-	["5"] = {Keybind = Enum.KeyCode.Five,  Tool = nil, UI = nil, Designation = "Miscellanous", PermanentUISpot = false},
-	["6"] = {Keybind = Enum.KeyCode.Six,   Tool = nil, UI = nil, Designation = "Miscellanous", PermanentUISpot = false},
-	["7"] = {Keybind = Enum.KeyCode.Seven, Tool = nil, UI = nil, Designation = "Miscellanous", PermanentUISpot = false},
-	["8"] = {Keybind = Enum.KeyCode.Eight, Tool = nil, UI = nil, Designation = "Miscellanous", PermanentUISpot = false},
-	["9"] = {Keybind = Enum.KeyCode.Nine,  Tool = nil, UI = nil, Designation = "Miscellanous", PermanentUISpot = false},
-	["0"] = {Keybind = Enum.KeyCode.Zero,  Tool = nil, UI = nil, Designation = "Miscellanous", PermanentUISpot = false},
+	["5"] = {Keybind = Enum.KeyCode.Five,  Tool = nil, UI = nil, Designation = "Miscellaneous", PermanentUISpot = false},
+	["6"] = {Keybind = Enum.KeyCode.Six,   Tool = nil, UI = nil, Designation = "Miscellaneous", PermanentUISpot = false},
+	["7"] = {Keybind = Enum.KeyCode.Seven, Tool = nil, UI = nil, Designation = "Miscellaneous", PermanentUISpot = false},
+	["8"] = {Keybind = Enum.KeyCode.Eight, Tool = nil, UI = nil, Designation = "Miscellaneous", PermanentUISpot = false},
+	["9"] = {Keybind = Enum.KeyCode.Nine,  Tool = nil, UI = nil, Designation = "Miscellaneous", PermanentUISpot = false},
+	["0"] = {Keybind = Enum.KeyCode.Zero,  Tool = nil, UI = nil, Designation = "Miscellaneous", PermanentUISpot = false},
 }
 
--- Explicit ordering: 1–9 then 0.
--- All loops use this so iteration is always deterministic.
 local SLOT_ORDER = {"1","2","3","4","5","6","7","8","9","0"}
 
 local current_equipped = nil
+local slots_visible = false
+local fade_token = 0
+local selected_key = nil
 
--- // Helpers
+-----------------------------------------------------------------------
+-- Helpers
+-----------------------------------------------------------------------
+
+local function tween_slot(ui, props)
+	local frame = ui.Frame
+	local image = ui.ImageLabel
+	local text  = ui.Hotkey
+	if not frame or not image or not text then
+		return
+	end
+
+	if props.BackgroundTransparency then
+		tween_service:Create(frame, TWEEN_INFO, {BackgroundTransparency = props.BackgroundTransparency}):Play()
+	end
+	if props.ImageTransparency then
+		tween_service:Create(image, TWEEN_INFO, {ImageTransparency = props.ImageTransparency}):Play()
+	end
+	if props.TextTransparency then
+		tween_service:Create(text, TWEEN_INFO, {TextTransparency = props.TextTransparency}):Play()
+	end
+
+	if props.BackgroundColor3 then
+		tween_service:Create(frame, TWEEN_INFO, {BackgroundColor3 = props.BackgroundColor3}):Play()
+	end
+	if props.ImageColor3 then
+		tween_service:Create(image, TWEEN_INFO, {ImageColor3 = props.ImageColor3}):Play()
+	end
+	if props.TextColor3 then
+		tween_service:Create(text, TWEEN_INFO, {TextColor3 = props.TextColor3}):Play()
+	end
+end
+
+local function create_slot_ui(slotNumber, slot)
+	local ui = example_frame:Clone()
+	ui.Name = "Slot_" .. slotNumber
+	ui.Parent = main_frame
+	ui.Visible = true
+
+	ui.Hotkey.Text = slotNumber
+	ui.ImageLabel.Image = empty_icon
+
+	ui.Frame.BackgroundTransparency = 1
+	ui.ImageLabel.ImageTransparency = 1
+	ui.Hotkey.TextTransparency = 1
+
+	slot.UI = ui
+end
+
+local function update_slot_ui(slot)
+	if not slot.UI then
+		return
+	end
+
+	slot.UI.ImageLabel.Image = (slot.Tool and slot.Tool.item_image) or empty_icon
+end
+
+-----------------------------------------------------------------------
+-- COLOR
+-----------------------------------------------------------------------
+
+local function set_slot_white(key)
+	local ui = InventorySlots[key].UI
+	if not ui then return end
+
+	tween_slot(ui, {
+		BackgroundColor3 = Color3.fromRGB(255,255,255),
+		ImageColor3      = Color3.fromRGB(255,255,255),
+		TextColor3       = Color3.fromRGB(255,255,255),
+	})
+end
+
+local function set_slot_black(key)
+	local ui = InventorySlots[key].UI
+	if not ui then return end
+
+	tween_slot(ui, {
+		BackgroundColor3 = Color3.fromRGB(0,0,0),
+		ImageColor3      = Color3.fromRGB(255,255,255),
+		TextColor3       = Color3.fromRGB(0,0,0),
+	})
+end
+
+-----------------------------------------------------------------------
+-- VISIBILITY
+-----------------------------------------------------------------------
+
+local function reveal_slots()
+	slots_visible = true
+	for _, key in ipairs(SLOT_ORDER) do
+		local ui = InventorySlots[key].UI
+		if ui then
+			tween_slot(ui, {
+				BackgroundTransparency = 0,
+				ImageTransparency = 0,
+				TextTransparency = 0,
+			})
+		end
+	end
+end
+
+local function fade_slots()
+	slots_visible = false
+	for _, key in ipairs(SLOT_ORDER) do
+		local ui = InventorySlots[key].UI
+		if ui then
+			tween_slot(ui, {
+				BackgroundTransparency = 1,
+				ImageTransparency = 1,
+				TextTransparency = 1,
+			})
+		end
+	end
+end
+
+-----------------------------------------------------------------------
+-- INPUT
+-----------------------------------------------------------------------
+
+local function update_highlight(new_key)
+	for _, key in ipairs(SLOT_ORDER) do
+		if InventorySlots[key].UI then
+			if key == new_key then
+				set_slot_white(key)
+			else
+				set_slot_black(key)
+			end
+		end
+	end
+end
+
+local function on_inventory_key(pressedKey)
+	fade_token += 1
+	local my_token = fade_token
+
+	if not slots_visible then
+		reveal_slots()
+	end
+
+	selected_key = pressedKey
+	update_highlight(pressedKey)
+
+	task.delay(FADE_DELAY, function()
+		if fade_token ~= my_token then
+			return
+		end
+
+		fade_slots()
+	end)
+end
+
+-----------------------------------------------------------------------
+-- TOOL MANAGEMENT
+-----------------------------------------------------------------------
 
 local function find_existing_tool(toolObject)
 	for _, key in ipairs(SLOT_ORDER) do
@@ -55,21 +214,16 @@ local function find_first_empty_slot(designation)
 			if not slot.Tool and slot.Designation == "Primary" then
 				return key
 			end
-		end
-	
-		
-		for _, key in ipairs(SLOT_ORDER) do
-			local slot = InventorySlots[key]
+
 			if not slot.Tool and slot.Designation == "Secondary" then
 				return key
 			end
 		end
-	end
+	end	
 
-	-- Third pass: any empty slot
 	for _, key in ipairs(SLOT_ORDER) do
 		local slot = InventorySlots[key]
-		if not slot.Tool and slot.Designation == "Miscellanous" then
+		if not slot.Tool and slot.Designation == "Miscellaneous" then
 			return key
 		end
 	end
@@ -77,31 +231,7 @@ local function find_first_empty_slot(designation)
 	return nil
 end
 
-local function create_slot_ui(slotNumber, slot)
-	local ui = example_frame:Clone()
-	ui.Name = "Slot_" .. slotNumber
-	ui.Parent = main_frame
-	ui.Visible = true
-
-	ui.Hotkey.Text = slotNumber
-	ui.ImageLabel.Image = empty_icon
-
-	slot.UI = ui
-end
-
-local function update_slot_ui(slot)
-	if not slot.UI then return end
-
-	if slot.Tool and slot.Tool.item_image then
-		slot.UI.ImageLabel.Image = slot.Tool.item_image
-	else
-		slot.UI.ImageLabel.Image = empty_icon
-	end
-end
-
 local function equip_tool(toolObject)
-	if not toolObject then return end
-
 	if current_equipped and current_equipped ~= toolObject then
 		current_equipped:unequip()
 	end
@@ -113,13 +243,10 @@ end
 local function assign_tool(toolObject)
 	if find_existing_tool(toolObject) then return end
 
-	local designation = toolObject.Designation or "Miscellanous"
+	local designation = toolObject.Designation or "Miscellaneous"
 	local slot_number = find_first_empty_slot(designation)
 
-	if not slot_number then
-		warn("no empty slots")
-		return
-	end
+	if not slot_number then return end
 
 	local slot = InventorySlots[slot_number]
 	slot.Tool = toolObject
@@ -129,13 +256,20 @@ local function assign_tool(toolObject)
 	end
 
 	update_slot_ui(slot)
+
+	fade_token += 1
+	local my_token = fade_token
+
+	if not slots_visible then
+		reveal_slots()
+	end
 end
 
 local function remove_tool(toolObject)
 	for _, key in ipairs(SLOT_ORDER) do
 		local slot = InventorySlots[key]
-		if slot.Tool == toolObject then
 
+		if slot.Tool == toolObject then
 			if current_equipped == toolObject then
 				toolObject:unequip()
 				current_equipped = nil
@@ -151,14 +285,13 @@ local function remove_tool(toolObject)
 					slot.UI = nil
 				end
 			end
-
-			-- Don't break — a tool should only ever be in one slot,
-			-- but this cleans up any accidental duplicates too.
 		end
 	end
 end
 
--- // Main
+-----------------------------------------------------------------------
+-- MAIN
+-----------------------------------------------------------------------
 
 function module.start_module()
 	for _, key in ipairs(SLOT_ORDER) do
@@ -173,8 +306,13 @@ function module.start_module()
 
 		for _, key in ipairs(SLOT_ORDER) do
 			local slot = InventorySlots[key]
+
 			if input.KeyCode == slot.Keybind then
-				if not slot.Tool then continue end
+				on_inventory_key(key)
+
+				if not slot.Tool then
+					return
+				end
 
 				if current_equipped == slot.Tool then
 					slot.Tool:unequip()
@@ -189,11 +327,9 @@ end
 
 function module.assign_tool(tool)
 	assign_tool(tool)
-	print("Assigned tool", tool)
 end
 
 function module.remove_tool(tool)
-	print("Removed Tool", tool)
 	remove_tool(tool)
 end
 

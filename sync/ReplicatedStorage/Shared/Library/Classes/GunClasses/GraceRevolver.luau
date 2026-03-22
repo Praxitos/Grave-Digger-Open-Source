@@ -45,7 +45,7 @@ function GraceRevolver.new(info: Types.BaseToolCreateInfo): GraceRevolver
 
 	self.className = "GraceRevolver"
 
-	self.item_image = "rbxassetid://127069712406722"
+	self.item_image = "rbxassetid://17601078078"
 	self.Designation = "Primary"
 
 	self.holster_reference =
@@ -54,19 +54,19 @@ function GraceRevolver.new(info: Types.BaseToolCreateInfo): GraceRevolver
 	self.model_reference = Tool_Folder:FindFirstChild("GraceRevolver")
 
 	self.motor_6d_data = {
-		Parent = "Left Arm",
-		Part0 = "Left Arm",
+		Parent = "Right Arm",
+		Part0 = "Right Arm",
 		Part1 = self.model_reference
 			and self.model_reference:FindFirstChild("GraceRevolver_Middle"),
-		C0 = CFrame.new(0.254, -1.703, -0.566)
-			* CFrame.Angles(math.rad(0.979), math.rad(-90), math.rad(90))
+		C0 = CFrame.new(-0.258, -1.438, -0.506)
+			* CFrame.Angles(math.rad(0), math.rad(-90), math.rad(90))
 	}
 
 	-- optional: if you add gun animations later
 	self.animations = {
-		--Draw = ReplicatedStorage.Shared.Assets.Animations.Tools.Guns.GraceRevolver.GraceRevolver_Draw,
-		--Hold = ReplicatedStorage.Shared.Assets.Animations.Tools.Guns.GraceRevolver.GraceRevolver_Held,
-		--Unequip = ReplicatedStorage.Shared.Assets.Animations.Tools.Guns.GraceRevolver.GraceRevolver_Unequip,
+		Draw = ReplicatedStorage.Shared.Assets.Animations.Tools.Guns.GraceRevolver.GraceRevolver_Draw,
+		Hold = ReplicatedStorage.Shared.Assets.Animations.Tools.Guns.GraceRevolver.GraceRevolver_Held,
+		Unequip = ReplicatedStorage.Shared.Assets.Animations.Tools.Guns.GraceRevolver.GraceRevolver_Unequip,
 	}
 
 	self.damage = 25
