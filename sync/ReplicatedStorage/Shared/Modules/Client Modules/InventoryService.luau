@@ -42,7 +42,6 @@ local function find_existing_tool(toolObject)
 end
 
 local function find_first_empty_slot(designation)
-	-- First pass: prefer a slot whose designation matches
 	for _, key in ipairs(SLOT_ORDER) do
 		local slot = InventorySlots[key]
 		if not slot.Tool and slot.Designation == designation then
@@ -50,7 +49,24 @@ local function find_first_empty_slot(designation)
 		end
 	end
 
-	-- Second pass: any empty slot
+	if designation == "Primary" or designation == "Secondary" then
+		for _, key in ipairs(SLOT_ORDER) do
+			local slot = InventorySlots[key]
+			if not slot.Tool and slot.Designation == "Primary" then
+				return key
+			end
+		end
+	
+		
+		for _, key in ipairs(SLOT_ORDER) do
+			local slot = InventorySlots[key]
+			if not slot.Tool and slot.Designation == "Secondary" then
+				return key
+			end
+		end
+	end
+
+	-- Third pass: any empty slot
 	for _, key in ipairs(SLOT_ORDER) do
 		local slot = InventorySlots[key]
 		if not slot.Tool and slot.Designation == "Miscellanous" then

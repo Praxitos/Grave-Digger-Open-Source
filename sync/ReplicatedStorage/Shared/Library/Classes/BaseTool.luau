@@ -146,19 +146,21 @@ function BaseTool:unequip()
 	local humanoid = character:FindFirstChildOfClass("Humanoid")
 	if not humanoid then return end
 
-	if self.RegisteredAnimations and self.RegisteredAnimations.Unequip then
-		self.RegisteredAnimations.Unequip:Play()
-		self.RegisteredAnimations.Unequip.Stopped:Wait()
-	end
-
-	humanoid:UnequipTools()
-
 	-- stop all animations
 	if self.RegisteredAnimations then
 		for _, anim in pairs(self.RegisteredAnimations) do
 			anim:Stop()
 		end
 	end
+	
+	if self.RegisteredAnimations and self.RegisteredAnimations.Unequip then
+		self.RegisteredAnimations.Unequip:Play()
+		if self.unequip_wait == true then
+			self.RegisteredAnimations.Unequip.Stopped:Wait()
+		end	
+	end
+
+	humanoid:UnequipTools()
 
 	-- optional subclass hook
 	if self._on_unequip then
