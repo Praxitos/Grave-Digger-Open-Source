@@ -89,6 +89,7 @@ function BaseTool:on_give(tool: Tool, holster: Model?, model: Model?)
 		warn("[" .. self.className .. "] Missing holster_reference")
 	end
 
+
 	-- activation binding
 	if self._activationConnection then
 		self._activationConnection:Disconnect()
@@ -125,11 +126,18 @@ function BaseTool:equip()
 		if hold then hold:Play() end
 	end
 
-	-- hide holster
-	if self.actual_holster then
-		utilities_module.hide_holster(LOCAL_PLAYER, self.actual_holster)
-	end
 
+	if self.model_reference then
+		self.actual_model = utilities_module.reverse_search_model(
+		game.Players.LocalPlayer,
+		self.model_reference.Name
+		)
+		
+		if not self.actual_model then
+			warn("[" .. self.className .. "] Failed to find model")
+		end
+	end
+	
 	-- optional subclass hook
 	if self._on_equip then
 		self:_on_equip()
@@ -166,6 +174,8 @@ function BaseTool:unequip()
 	if self._on_unequip then
 		self:_on_unequip()
 	end
+	
+	self.actual_model = nil
 end
 
 -- activation (must be overridden)

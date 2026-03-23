@@ -1,5 +1,7 @@
 --!strict
 
+local TweenService = game:GetService("TweenService")
+
 local Util = {}
 
 -- Deep copy table
@@ -41,7 +43,7 @@ function Util.hide_holster(player: Player, holster_reference: Instance)
 		if child:GetAttribute("Hide_On_Equip") then
 			child.Transparency = 1
 		end
-	end	
+	end
 end
 
 function Util.show_holster(player: Player, holster_reference: Instance)
@@ -49,7 +51,7 @@ function Util.show_holster(player: Player, holster_reference: Instance)
 		if child:GetAttribute("Hide_On_Equip") then
 			child.Transparency = 0
 		end
-	end	
+	end
 end
 
 -- // only use when you know the holster is there
@@ -61,7 +63,6 @@ function Util.reverse_search_holster(player: Player, name: string)
 	local renderedHolsters = characterData:WaitForChild("Rendered_Holsters")
 
 	local holster = renderedHolsters:WaitForChild(name)
-	
 
 	if not holster then
 		warn("Could not find holster with:", name)
@@ -70,21 +71,29 @@ function Util.reverse_search_holster(player: Player, name: string)
 	return holster
 end
 
+function Util.reverse_search_model(player, name: string)
+	local character = player.Character or player.CharacterAdded:Wait()
+	local characterdata = character:WaitForChild("CharacterData")
+	local Equipment_Folder = characterdata:WaitForChild("Equipment")
+
+	return Equipment_Folder:WaitForChild(name)
+end
+
 function Util.send_raycast(origin: Vector3, direction: Vector3, blacklist: table, whitelist: table)
 	if not origin or not direction then warn("[SEND_RAYCAST() FAILED! Origin/Direction not provided") return end
 
-    local raycast_params = RaycastParams.new()
+	local raycast_params = RaycastParams.new()
 
 	if blacklist then
 		raycast_params.FilterType = Enum.RaycastFilterType.Blacklist
-    	raycast_params.FilterDescendantsInstances = blacklist
+		raycast_params.FilterDescendantsInstances = blacklist
 	elseif whitelist then
 		raycast_params.FilterType = Enum.RaycastFilterType.Whitelist
 		raycast_params.FilterDescendantsInstances = whitelist
 	end
-	
-    local raycast_result = workspace:Raycast(origin, direction, raycast_params)
-    return raycast_result
+
+	local raycast_result = workspace:Raycast(origin, direction, raycast_params)
+	return raycast_result
 end
 
 function Util.MakeFuzzyFinder(list)
@@ -132,7 +141,7 @@ function Util.register_animations(player: Player, animations_table: table)
 	end
 
 	local animator: Animator = humanoid:FindFirstChildOfClass("Animator")
-	
+
 	if not animator then
 		warn("register_animations: Animator not found, creating one for", player.Name)
 		animator = Instance.new("Animator")
@@ -143,20 +152,17 @@ function Util.register_animations(player: Player, animations_table: table)
 
 	for name, anim in pairs(animations_table) do
 		print("Checking", anim.Name, "has value of:", anim.AnimationId)
-		
-		--  Type safety check
+
 		if typeof(anim) ~= "Instance" or not anim:IsA("Animation") then
 			warn("Invalid animation for key:", name, "| Expected Animation, got:", typeof(anim))
 			continue
 		end
 
-		-- Asset ID check
 		if not anim.AnimationId or anim.AnimationId == "" then
 			warn("Animation missing AnimationId:", name)
 			continue
 		end
 
-		--  Safe load
 		local success, loadedAnim = pcall(function()
 			return animator:LoadAnimation(anim)
 		end)
@@ -179,5 +185,111 @@ function Util.emit_part(part: Part)
 	end
 end
 
-return Util
+--[[
+	Sets up a FastCast caster with bullet trail visuals.
 
+	config = {
+		bulletTemplate  : Instance        -- cosmetic bullet part template
+		bulletContainer : Instance        -- where cosmetic bullets are parented (usually workspace)
+		trailFadeTime   : number?         -- seconds for trail to fade out (default 0.15)
+		trailColor      : BrickColor?     -- trail color (default White)
+		trailThickness  : number?         -- trail diameter (default 0.07)
+		onHit           : (cast, result: RaycastResult, cosmeticBullet: BasePart?) -> ()?
+	}
+
+	Returns: caster, behavior
+]]
+function Util.setupFastCast(config: {
+	bulletTemplate: Instance,
+	bulletContainer: Instance,
+	trailFadeTime: number?,
+	trailColor: BrickColor?,
+	trailThickness: number?,
+	onHit: ((cast: any, result: RaycastResult, cosmeticBullet: BasePart?) -> ())?,
+	})
+	local FastCast = require(game:GetService("ReplicatedStorage").Shared.Library.Externals.FastCast)
+
+	local caster = FastCast.new()
+	local behavior = FastCast.newBehavior()
+
+	local rayParams = RaycastParams.new()
+	rayParams.FilterType = Enum.RaycastFilterType.Blacklist
+	rayParams.IgnoreWater = true
+
+	behavior.RaycastParams = rayParams
+	behavior.CosmeticBulletTemplate = config.bulletTemplate
+	behavior.CosmeticBulletContainer = config.bulletContainer
+	behavior.AutoIgnoreContainer = true
+
+	local fadeTime = config.trailFadeTime or 0.15
+	local trailColor = config.trailColor or BrickColor.new("White")
+	local trailThickness = config.trailThickness or 0.07
+
+	local castTrails: { [any]: Part } = {}
+
+	local function fadeAndDestroy(part: Part)
+		local tween = TweenService:Create(
+			part,
+			TweenInfo.new(fadeTime, Enum.EasingStyle.Linear),
+			{ Transparency = 1 }
+		)
+		tween:Play()
+		tween.Completed:Connect(function()
+			part:Destroy()
+		end)
+	end
+
+	caster.LengthChanged:Connect(function(cast, lastPoint, direction, length, velocity, cosmeticBullet)
+		if cosmeticBullet then
+			cosmeticBullet.Position = lastPoint + (direction * length)
+		end
+
+		if not castTrails[cast] then
+			local trail = Instance.new("Part")
+			trail.Anchored = true
+			trail.CanCollide = false
+			trail.CanQuery = false
+			trail.CastShadow = false
+			trail.Material = Enum.Material.Neon
+			trail.BrickColor = trailColor
+			trail.Transparency = 0.4
+			trail.Parent = workspace
+			castTrails[cast] = trail
+		end
+
+		local trail = castTrails[cast]
+		local tipPosition = lastPoint + (direction * length)
+		local midPoint = (lastPoint + tipPosition) / 2
+
+		trail.Size = Vector3.new(trailThickness, trailThickness, length)
+		trail.CFrame = CFrame.new(midPoint, tipPosition)
+	end)
+
+	caster.RayHit:Connect(function(cast, result, velocity, cosmeticBullet)
+		if config.onHit then
+			config.onHit(cast, result, cosmeticBullet)
+		end
+
+		if cosmeticBullet then
+			cosmeticBullet:Destroy()
+		end
+
+		local trail = castTrails[cast]
+		if trail then
+			castTrails[cast] = nil
+			fadeAndDestroy(trail)
+		end
+	end)
+
+	caster.CastTerminating:Connect(function(cast)
+		local trail = castTrails[cast]
+		if trail then
+			castTrails[cast] = nil
+			fadeAndDestroy(trail)
+		end
+	end)
+
+	return caster, behavior
+end
+
+return Util
