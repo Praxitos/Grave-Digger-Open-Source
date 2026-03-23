@@ -41,16 +41,15 @@ local ZOOM_LERP_SPEED = 10
 
 local COLLISION_OFFSET = 0.25
 
--- Free-look: camera pans to the orbit position on entry, then mouse drives freely.
--- Holding RMB while in free-look orbits around the head like the default Roblox camera.
 local FREELOOK_PAN_SPEED      = 8
 local FREELOOK_PAN_THRESHOLD  = 0.25
 local FREELOOK_ORBIT_DISTANCE = 5
 
 local FIRST_PERSON_DEBOUNCE = 0.2
 local SHOULDER_DEBOUNCE     = 0.2
--- Alt fires two InputBegan events per physical press; this swallows the duplicate.
 local FREELOOK_DEBOUNCE     = 0.15
+
+local RECOIL_DECAY_SPEED = 8
 
 ------------------------------------------------------------------------
 -- Module setup
@@ -140,13 +139,11 @@ function BaseCamera:Start()
 	InputService.MouseBehavior    = Enum.MouseBehavior.LockCenter
 	InputService.MouseIconEnabled = false
 
+	LocalPlayer:SetAttribute("Current_Shoulder", "Right")
+
 	self.CameraYaw   = 0
 	self.CameraPitch = 0
 
-	-- Free-look state
-	-- FreeLookPhase: "panning" = sliding to orbit position on entry
-	--                "orbiting" = mouse drives camera freely
-	-- FreeLookRMB: true while RMB is held — orbits around head like default camera
 	self.IsFreeLook       = false
 	self.FreeLookPhase    = "orbiting"
 	self.FreeLookYaw      = 0
@@ -171,6 +168,10 @@ function BaseCamera:Start()
 	self.CurrentFOV  = BASE_FOV
 	self.SmoothedPos = Camera.CFrame.Position
 
+	-- Recoil state
+	self.RecoilPitch = 0
+	self.RecoilYaw   = 0
+
 	local character = LocalPlayer.Character
 	local root      = character and character:FindFirstChild("HumanoidRootPart")
 	if root then
@@ -194,7 +195,6 @@ function BaseCamera:Start()
 		InputService.InputBegan:Connect(function(input, gameProcessed)
 			if gameProcessed then return end
 
-			-- RMB held in free-look → enable orbit mode
 			if input.UserInputType == Enum.UserInputType.MouseButton2 then
 				if self.IsFreeLook and self.FreeLookPhase == "orbiting" then
 					self.FreeLookRMB = true
@@ -218,6 +218,13 @@ function BaseCamera:Start()
 				self.IsRightShoulder  = not self.IsRightShoulder
 				self.TargetShoulder   = self.IsRightShoulder
 					and self.RightShoulderOffset or self.LeftShoulderOffset
+				
+				if LocalPlayer:GetAttribute("Current_Shoulder") == "Right" then
+					LocalPlayer:SetAttribute("Current_Shoulder", "Left")
+				else
+					LocalPlayer:SetAttribute("Current_Shoulder", "Right")
+				end
+				
 				task.delay(SHOULDER_DEBOUNCE, function() self.ShoulderDebounce = false end)
 
 			elseif keyMatches(pressedName, freeLookKey) then
@@ -253,13 +260,12 @@ function BaseCamera:Start()
 		end),
 
 		------------------------------------------------------------------------
-		-- RMB released → exit free-look orbit, restore mouse icon
+		-- RMB released
 		------------------------------------------------------------------------
 		InputService.InputEnded:Connect(function(input, gameProcessed)
 			if input.UserInputType == Enum.UserInputType.MouseButton2 then
 				if self.FreeLookRMB then
 					self.FreeLookRMB              = false
-					-- Restore free-look mouse (visible, unlocked)
 					InputService.MouseBehavior    = Enum.MouseBehavior.LockCenter
 					InputService.MouseIconEnabled = false
 				end
@@ -267,7 +273,7 @@ function BaseCamera:Start()
 		end),
 
 		------------------------------------------------------------------------
-		-- Scroll zoom (OTS only)
+		-- Scroll zoom
 		------------------------------------------------------------------------
 		InputService.InputChanged:Connect(function(input, gameProcessed)
 			if gameProcessed then return end
@@ -282,7 +288,7 @@ function BaseCamera:Start()
 		end),
 
 		------------------------------------------------------------------------
-		-- Exit free-look if window loses focus (e.g. Alt-Tab)
+		-- Focus lost
 		------------------------------------------------------------------------
 		InputService.WindowFocusReleased:Connect(function()
 			if self.IsFreeLook then
@@ -291,7 +297,7 @@ function BaseCamera:Start()
 		end),
 
 		------------------------------------------------------------------------
-		-- Reset on character respawn
+		-- Character respawn
 		------------------------------------------------------------------------
 		LocalPlayer.CharacterAdded:Connect(function(newCharacter)
 			self.IsFirstPerson       = false
@@ -299,6 +305,8 @@ function BaseCamera:Start()
 			self.FreeLookDebounce    = false
 			self.FirstPersonDebounce = false
 			self.ShoulderDebounce    = false
+			self.RecoilPitch         = 0
+			self.RecoilYaw           = 0
 			exitFreeLook(self, newCharacter)
 
 			local r = newCharacter:WaitForChild("HumanoidRootPart")
@@ -309,6 +317,15 @@ function BaseCamera:Start()
 			self.SmoothedPos   = r.Position + Vector3.new(0, getOffset("heightOffset", DEFAULT_HEIGHT), 0)
 		end),
 	}
+end
+
+------------------------------------------------------------------------
+-- ApplyRecoil
+------------------------------------------------------------------------
+
+function BaseCamera:ApplyRecoil(pitchDelta: number, yawDelta: number)
+	self.RecoilPitch += pitchDelta
+	self.RecoilYaw   += yawDelta
 end
 
 ------------------------------------------------------------------------
@@ -336,8 +353,6 @@ function BaseCamera:Update(dt: number)
 
 	if self.IsFreeLook then
 		humanoid.AutoRotate = true
-		-- During panning, discard mouse input so the slide plays cleanly.
-		-- RMB orbit and normal free-look both drive FreeLook angles.
 		if self.FreeLookPhase == "orbiting" then
 			self.FreeLookYaw   += math.rad(-delta.X * sensitivity)
 			self.FreeLookPitch += math.rad(-delta.Y * sensitivity)
@@ -352,8 +367,12 @@ function BaseCamera:Update(dt: number)
 		self.FreeLookPitch = self.CameraPitch
 	end
 
-	local activeYaw   = self.IsFreeLook and self.FreeLookYaw   or self.CameraYaw
-	local activePitch = self.IsFreeLook and self.FreeLookPitch or self.CameraPitch
+	-- Decay recoil
+	self.RecoilPitch = lerp(self.RecoilPitch, 0, RECOIL_DECAY_SPEED, dt)
+	self.RecoilYaw   = lerp(self.RecoilYaw,   0, RECOIL_DECAY_SPEED, dt)
+
+	local activeYaw   = (self.IsFreeLook and self.FreeLookYaw   or self.CameraYaw)   + self.RecoilYaw
+	local activePitch = (self.IsFreeLook and self.FreeLookPitch or self.CameraPitch) + self.RecoilPitch
 
 	--------------------------------------------------------------------
 	-- 2. Character body rotation (OTS only)
@@ -419,14 +438,12 @@ function BaseCamera:Update(dt: number)
 	local rayOrigin:  Vector3
 
 	if self.IsFirstPerson then
-		-- Camera sits at the head; no collision needed.
 		desiredPos = headPos
 		rayOrigin  = headPos
 
 	elseif self.IsFreeLook then
 
 		if self.FreeLookPhase == "panning" then
-			-- Slide SmoothedPos toward the orbit position (never toward the head itself).
 			local orbitPos = headPos - rotation.LookVector * FREELOOK_ORBIT_DISTANCE
 			self.SmoothedPos = lerpVec(self.SmoothedPos, orbitPos, FREELOOK_PAN_SPEED, dt)
 
@@ -437,23 +454,14 @@ function BaseCamera:Update(dt: number)
 				self.FreeLookPitch = activePitch
 			end
 
-			-- Apply directly and skip collision + smooth steps while panning.
 			Camera.CFrame = CFrame.new(self.SmoothedPos) * CFrame.Angles(0, activeYaw, 0) * CFrame.Angles(activePitch, 0, 0)
 			return
 		end
 
-		-- Orbiting phase.
-		-- RMB held: orbit around the head at a fixed distance (Roblox-style).
-		-- No RMB: camera sits at the fixed orbit position, mouse pans freely.
-		if self.FreeLookRMB then
-			desiredPos = headPos - rotation.LookVector * FREELOOK_ORBIT_DISTANCE
-		else
-			desiredPos = headPos - rotation.LookVector * FREELOOK_ORBIT_DISTANCE
-		end
-		rayOrigin = headPos
+		desiredPos = headPos - rotation.LookVector * FREELOOK_ORBIT_DISTANCE
+		rayOrigin  = headPos
 
 	else
-		-- Standard OTS
 		desiredPos = focusPoint + rotation.RightVector * self.CurrentShoulder - rotation.LookVector * self.CurrentDistance
 		rayOrigin  = focusPoint
 	end

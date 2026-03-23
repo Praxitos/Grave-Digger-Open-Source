@@ -14,6 +14,10 @@ local Util = require(script.Parent.Parent.Parent.Util)
 local Holster_Folder = ReplicatedStorage.Shared.Assets.Holsters:FindFirstChild("Gun Holsters")
 local Tool_Folder = ReplicatedStorage.Shared.Assets.ToolModels
 
+local CYCLE_TIME      = 0.55
+local CYCLE_REST_TIME = 0.15
+local FIRE_RATE       = 0.3
+
 local PrinceRifle = {}
 PrinceRifle.__index = PrinceRifle
 setmetatable(PrinceRifle, { __index = BaseTool })
@@ -73,26 +77,39 @@ function PrinceRifle.new(info: Types.BaseToolCreateInfo): PrinceRifle
 			* CFrame.Angles(math.rad(0.979), math.rad(-90), math.rad(90))
 	}
 
+	local Animations_Folder = ReplicatedStorage.Shared.Assets.Animations.Tools.Guns.PrinceRifle
 	self.animations = {
-		Draw    = ReplicatedStorage.Shared.Assets.Animations.Tools.Guns.PrinceRifle.PrinceRifle_Draw,
-		Hold    = ReplicatedStorage.Shared.Assets.Animations.Tools.Guns.PrinceRifle.PrinceRifle_Held,
-		Unequip = ReplicatedStorage.Shared.Assets.Animations.Tools.Guns.PrinceRifle.PrinceRifle_Unequip,
-		Aim     = ReplicatedStorage.Shared.Assets.Animations.Tools.Guns.PrinceRifle.PrinceRifle_Aim,
-		Fire    = ReplicatedStorage.Shared.Assets.Animations.Tools.Guns.PrinceRifle.PrinceRifle_Fire,
-		Cycle   = ReplicatedStorage.Shared.Assets.Animations.Tools.Guns.PrinceRifle.PrinceRifle_Cycle,
+		Draw    = Animations_Folder.PrinceRifle_Draw,
+		Hold    = Animations_Folder.PrinceRifle_Held,
+		Unequip = Animations_Folder.PrinceRifle_Unequip,
+		
+		Aim     = Animations_Folder.PrinceRifle_Aim,
+		Aim_Left = Animations_Folder.PrinceRifle_Aim_Left,
+		
+		Fire    = Animations_Folder.PrinceRifle_Fire,
+		Fire_Left = Animations_Folder.PrinceRifle_Fire_Left,
+		
+		Cycle   = Animations_Folder.PrinceRifle_Cycle,
+		
 	}
 
-	self.damage = 25
-	self.unequip_wait = false
-	self.Aiming = false
-	self.Cycled = true
+	self.damage        = 25
+	self.unequip_wait  = false
+	self.Aiming        = false
+	self.Cycled        = true
+	self.Firing        = false  -- prevents fire spam during fire_rate delay
+	self.Cycling       = false  -- prevents re-entry during cycle
 
-	self._aimConnection = nil
-	self._motorOriginal = nil
+	self._aimConnection   = nil
+	self._motorOriginal   = nil
+	self._leftShoulder    = nil
+	self._rightShoulder   = nil
+	self._leftShoulderC0  = nil
+	self._rightShoulderC0 = nil
 
-	--------------------------------------------------
-	-- FastCast
-	--------------------------------------------------
+	self.recoil = 10
+	self.recoil_count = 6
+	
 
 	self.Caster, self.CasterBehavior = Util.setupFastCast({
 		bulletTemplate  = ReplicatedStorage.Shared.Assets.Effects.Shooting.Bullet,
@@ -101,10 +118,6 @@ function PrinceRifle.new(info: Types.BaseToolCreateInfo): PrinceRifle
 			print("Hit:", result.Instance, result.Position)
 		end,
 	})
-
-	--------------------------------------------------
-	-- Input Handling (cleaned up)
-	--------------------------------------------------
 
 	self._inputBeganConn = UserInputService.InputBegan:Connect(function(input, gameProcessed)
 		if gameProcessed then return end
@@ -120,6 +133,29 @@ function PrinceRifle.new(info: Types.BaseToolCreateInfo): PrinceRifle
 		end
 	end)
 
+	
+	if game:GetService("RunService"):IsClient() then
+		self.current_shoulder = game.Players.LocalPlayer:GetAttribute("Current_Shoulder")
+		
+		game.Players.LocalPlayer:GetAttributeChangedSignal("Current_Shoulder"):Connect(function()
+			self.current_shoulder = game.Players.LocalPlayer:GetAttribute("Current_Shoulder")
+			
+			if self.Aiming and not self.Cycling then
+				for _, child in pairs(self.RegisteredAnimations) do
+					child:Stop()
+				end
+				
+				if self.current_shoulder == "Right" then
+					self.RegisteredAnimations.Aim:Play()
+					self.Aiming = true
+				else
+					self.RegisteredAnimations.Aim_Left:Play()
+					self.Aiming = true
+				end
+			end
+		end)
+	end
+	
 	return self
 end
 
@@ -131,8 +167,8 @@ function PrinceRifle:_cacheMotor6D()
 	if not self.motor_6d then return end
 
 	self._motorOriginal = {
-		C0 = self.motor_6d.C0,
-		C1 = self.motor_6d.C1,
+		C0   = self.motor_6d.C0,
+		C1   = self.motor_6d.C1,
 		Part0 = self.motor_6d.Part0,
 		Part1 = self.motor_6d.Part1,
 	}
@@ -141,9 +177,9 @@ end
 function PrinceRifle:_resetMotor6D()
 	if not self.motor_6d or not self._motorOriginal then return end
 
-	local motor = self.motor_6d
-	local targetC0 = self._motorOriginal.C0
-	local targetC1 = self._motorOriginal.C1
+	local motor     = self.motor_6d
+	local targetC0  = self._motorOriginal.C0
+	local targetC1  = self._motorOriginal.C1
 
 	local conn
 	conn = RunService.PreSimulation:Connect(function()
@@ -167,28 +203,25 @@ function PrinceRifle:_startAimTracking()
 	local torso = character:FindFirstChild("Torso")
 	if not torso then return end
 
-	local leftShoulder = torso:FindFirstChild("Left Shoulder")
+	local leftShoulder  = torso:FindFirstChild("Left Shoulder")
 	local rightShoulder = torso:FindFirstChild("Right Shoulder")
 	if not leftShoulder or not rightShoulder then return end
 
-	self._leftShoulder = leftShoulder
-	self._rightShoulder = rightShoulder
-	self._leftShoulderC0 = leftShoulder.C0
+	self._leftShoulder    = leftShoulder
+	self._rightShoulder   = rightShoulder
+	self._leftShoulderC0  = leftShoulder.C0
 	self._rightShoulderC0 = rightShoulder.C0
 
 	self._aimConnection = RunService.PreSimulation:Connect(function()
 		if not self.Aiming then return end
 
-		local camera = workspace.CurrentCamera
-		local pitch = camera.CFrame:ToEulerAnglesYXZ()
-
-		local aimAngle = math.clamp(select(1, pitch), math.rad(-60), math.rad(60))
+		local pitch = workspace.CurrentCamera.CFrame:ToEulerAnglesYXZ()
+		local aimAngle = math.clamp(pitch, math.rad(-60), math.rad(60))
 
 		leftShoulder.C0 = leftShoulder.C0:Lerp(
 			self._leftShoulderC0 * CFrame.Angles(0, 0, -aimAngle),
 			0.1
 		)
-
 		rightShoulder.C0 = rightShoulder.C0:Lerp(
 			self._rightShoulderC0 * CFrame.Angles(0, 0, aimAngle),
 			0.1
@@ -202,26 +235,14 @@ function PrinceRifle:_stopAimTracking()
 		self._aimConnection = nil
 	end
 
-	if self._leftShoulder and self._leftShoulderC0 and self._rightShoulder and self._rightShoulderC0 then
-		local leftShoulder = self._leftShoulder
-		local rightShoulder = self._rightShoulder
-		local leftTargetC0 = self._leftShoulderC0
-		local rightTargetC0 = self._rightShoulderC0
-
-		local resetConn
-		resetConn = RunService.PreSimulation:Connect(function()
-			leftShoulder.C0 = leftShoulder.C0:Lerp(leftTargetC0, 0.1)
-			rightShoulder.C0 = rightShoulder.C0:Lerp(rightTargetC0, 0.1)
-
-			if (leftShoulder.C0.Position - leftTargetC0.Position).Magnitude < 0.001 then
-				resetConn:Disconnect()
-			end
-		end)
+	if self._leftShoulder and self._rightShoulder then
+		self._leftShoulder.C0  = self._leftShoulderC0
+		self._rightShoulder.C0 = self._rightShoulderC0
 	end
 
-	self._leftShoulder = nil
-	self._rightShoulder = nil
-	self._leftShoulderC0 = nil
+	self._leftShoulder    = nil
+	self._rightShoulder   = nil
+	self._leftShoulderC0  = nil
 	self._rightShoulderC0 = nil
 end
 
@@ -235,8 +256,14 @@ function PrinceRifle:aim()
 	end
 
 	if not self.Aiming then
-		self.RegisteredAnimations.Aim:Play()
-		self.Aiming = true
+		if self.current_shoulder == "Right" then
+			self.RegisteredAnimations.Aim:Play()
+			self.Aiming = true
+		else
+			self.RegisteredAnimations.Aim_Left:Play()
+			self.Aiming = true
+		end
+		
 		self:_startAimTracking()
 	else
 		self:_stopAimTracking()
@@ -254,6 +281,9 @@ function PrinceRifle:aim()
 end
 
 function PrinceRifle:cycle()
+	if self.Cycling then return end
+	self.Cycling = true
+
 	for _, child in pairs(self.RegisteredAnimations) do
 		child:Stop()
 	end
@@ -261,40 +291,73 @@ function PrinceRifle:cycle()
 	self.RegisteredAnimations.Cycle:Play()
 	self.RegisteredAnimations.Cycle.Stopped:Wait()
 
-	self.Cycled = true
-
 	if self.Aiming then
-		self.RegisteredAnimations.Aim:Play()
+		if self.current_shoulder == "Right" then
+			self.RegisteredAnimations.Aim:Play()
+		else
+			self.RegisteredAnimations.Aim_Left:Play()
+		end
 	else
 		self.RegisteredAnimations.Hold:Play()
 	end
+	-- cycle_rest: brief pause after bolt work before weapon is ready
+	task.wait(CYCLE_REST_TIME)
+
+	self.Cycled  = true
+	self.Cycling = false
 end
 
 function PrinceRifle:fire()
-	local camera = workspace.CurrentCamera
+	if self.Firing then return end
+	self.Firing = true
 
 	local muzzle = self.actual_model and self.actual_model:FindFirstChild("PrinceRifle_Muzzle")
-	if not muzzle then return end
+	if not muzzle then
+		self.Firing = false
+		return
+	end
 
-	local origin = muzzle.Position
+	local camera    = workspace.CurrentCamera
+	local origin    = muzzle.Position
 	local direction = camera.CFrame.LookVector.Unit
 
 	self.Caster:Fire(origin, direction, 1000, self.CasterBehavior)
-	self.RegisteredAnimations.Fire:Play()
+	
+	if self.current_shoulder == "Right" then
+		self.RegisteredAnimations.Fire:Play()
+	else
+		self.RegisteredAnimations.Fire_Left:Play()
+	end
+	
 	self.Cycled = false
+	
+	Util.applyRecoil(self.recoil, self.recoil_count, 10, false)
+
+	-- fire_rate: minimum time between shots
+	task.wait(FIRE_RATE)
+	self.Firing = false
 end
 
 function PrinceRifle:activate()
 	if not self.actual_model then return end
+	if self.Firing or self.Cycling then return end
 
 	if not self.Cycled then
-		self:cycle()
+		task.spawn(function() self:cycle() end)
 		return
 	end
 
 	if not self.Aiming then return end
 
-	self:fire()
+	task.spawn(function() self:fire() end)
+end
+
+--////////////////////////////////////////////////////////
+-- Equip hook
+--////////////////////////////////////////////////////////
+
+function PrinceRifle:_on_equip()
+	self:_cacheMotor6D()
 end
 
 --////////////////////////////////////////////////////////
@@ -309,8 +372,10 @@ function PrinceRifle:_on_unequip()
 	self:_stopAimTracking()
 	self:_resetMotor6D()
 
-	self.Aiming = false
-	self.Cycled = true
+	self.Aiming   = false
+	self.Cycled   = true
+	self.Firing   = false
+	self.Cycling  = false
 end
 
 function PrinceRifle:Destroy()

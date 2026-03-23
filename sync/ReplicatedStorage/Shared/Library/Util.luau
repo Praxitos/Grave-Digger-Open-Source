@@ -292,4 +292,32 @@ function Util.setupFastCast(config: {
 	return caster, behavior
 end
 
+local Camera_Service = require(game.ReplicatedStorage.Shared.Modules["Client Modules"].CameraService)
+
+function Util.applyRecoil(recoil: number, recoilCount: number, spread: number, doRoll: boolean?)
+	local vertical   = math.rad(recoil / 10)
+	local horizontal = math.rad(math.random(-spread * 10, spread * 10) / 100)
+
+	-- initial kick
+	Camera_Service.apply_recoil(vertical, horizontal)
+
+	-- stepped kick
+	task.spawn(function()
+		for _ = 1, recoilCount do
+			Camera_Service.apply_recoil(vertical * 0.3, horizontal * 0.3)
+			task.wait(0.015)
+		end
+	end)
+
+	-- optional roll
+	if doRoll then
+		task.spawn(function()
+			for _ = 1, 4 do
+				Camera_Service.apply_recoil(0, 0)  -- placeholder, roll handled separately
+				task.wait(0.015)
+			end
+		end)
+	end
+end
+
 return Util

@@ -77,6 +77,12 @@ function module.switch_camera(target_camera_name:string, abrupt_change:boolean)
     current_camera_module:Start()
 end
 
+function module.apply_recoil(vertical, horizontal)
+	if current_camera_module.name ~= "BaseCamera" then
+		current_camera_module:ApplyRecoil(vertical, horizontal)
+	end
+end
+
 
 
 return module
