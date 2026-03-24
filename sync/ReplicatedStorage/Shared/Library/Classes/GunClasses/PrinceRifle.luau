@@ -385,11 +385,11 @@ end
 -- Fires a single round, applies recoil, then enforces the fire-rate delay.
 function PrinceRifle:fire()
 	
-	
 	if self.Capacity <= 0 then
 		self:Reload()
 		return
 	end
+	
 	if self.Firing then return end
 	self.Firing = true
 
@@ -399,7 +399,9 @@ function PrinceRifle:fire()
 		return
 	end
 
-	if PrinceRifle:_if_sprinting() then return end
+	if PrinceRifle:_if_sprinting() then warn("Player is sprinting")	return end
+	
+	print("Firing")
 	local camera = workspace.CurrentCamera
 	self.Caster:Fire(muzzle.Position, camera.CFrame.LookVector.Unit, 1000, self.CasterBehavior)
 

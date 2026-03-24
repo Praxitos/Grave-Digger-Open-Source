@@ -30,23 +30,21 @@ local InputOptions = SettingsData:WaitForChild("Input Options")
 local SprintKey = InputOptions:WaitForChild("Sprint")
 
 local Sprint_Config = ReplicatedStorage.Shared.Library.Configuration.Character_Variables.Movement.Sprint
-local BaseSpeed = Sprint_Config:WaitForChild("BaseSpeed").Value
-local MaxSpeed = Sprint_Config:WaitForChild("MaxSpeed").Value
+local BaseSpeed     = Sprint_Config:WaitForChild("BaseSpeed").Value
+local MaxSpeed      = Sprint_Config:WaitForChild("MaxSpeed").Value
 local Tick_Debounce = Sprint_Config:WaitForChild("Tick_Debounce").Value
-local Tick_Speed = Sprint_Config:WaitForChild("Tick_Speed").Value
+local Tick_Speed    = Sprint_Config:WaitForChild("Tick_Speed").Value
 local Speed_Increase = Sprint_Config:WaitForChild("Speed_Increase").Value
 
-local AimingUtils = require(LocalPlayer.PlayerGui:WaitForChild("Aiming"):WaitForChild("Utils"))
-
 -- // State
-local Sprinting = false
+local Sprinting   = false
 local LoopRunning = false
 
 local KeyStates = {
-	Forward = false,
+	Forward   = false,
 	Backwards = false,
-	Left = false,
-	Right = false,
+	Left      = false,
+	Right     = false,
 }
 
 -- // Helpers
@@ -64,14 +62,25 @@ local function setSprintAttribute(state: boolean)
 	end
 end
 
+-- Sets the HoldBreathe attribute — camera script watches this to trigger hold/release
+local function setHoldBreathe(holding: boolean)
+	if not Character then return end
+	if holding then
+		Character:SetAttribute("HoldBreathe", true)
+	else
+		Character:SetAttribute("HoldBreathe", nil) -- deletion triggers release in camera
+	end
+end
+
 local function resetSpeed()
 	if not Character or not Humanoid then return end
 
-	Sprinting = false          -- always clear this
-	setSprintAttribute(false)  -- always clear the attribute
+	Sprinting = false
+	setSprintAttribute(false)
 
 	if Character:GetAttribute("Aiming") then
-		AimingUtils.release_breath()
+		-- We were hold-breathing during an aimed sprint; release it via attribute
+		setHoldBreathe(false)
 	else
 		Humanoid.WalkSpeed = BaseSpeed
 	end
@@ -82,18 +91,18 @@ local function sprintLoop()
 	if LoopRunning then return end
 	LoopRunning = true
 
-	setSprintAttribute(true)
-
 	task.wait(Tick_Debounce)
 
 	while Sprinting do
 		if not Character or not Humanoid or not RootPart then break end
 
-		-- Cancel if aiming
+		-- If aiming, switch into hold-breath mode instead of normal sprint
 		if Character:GetAttribute("Aiming") then
-			AimingUtils.hold_breath()
+			setHoldBreathe(true)
 			break
 		end
+
+		setSprintAttribute(true)
 
 		-- Only accelerate forward
 		if KeyStates.Forward and not KeyStates.Backwards then
@@ -105,9 +114,8 @@ local function sprintLoop()
 			end
 		end
 
-		-- Velocity check
+		-- Velocity check — cancel sprint if character isn't keeping up
 		local velocity = RootPart.AssemblyLinearVelocity.Magnitude
-
 		if math.abs(velocity - Humanoid.WalkSpeed) > 2 then
 			Sprinting = false
 			resetSpeed()
@@ -131,7 +139,7 @@ function module.start_module()
 
 		if input.KeyCode == getSprintKey() then
 			Sprinting = true
-			task.spawn(sprintLoop) -- prevents yield blocking
+			task.spawn(sprintLoop)
 		end
 
 		if input.KeyCode == Enum.KeyCode.W then
@@ -149,6 +157,7 @@ function module.start_module()
 		if input.KeyCode == getSprintKey() then
 			Sprinting = false
 			resetSpeed()
+			setHoldBreathe(false) -- always clean up in case we were in breath-hold state
 		end
 
 		if input.KeyCode == Enum.KeyCode.W then

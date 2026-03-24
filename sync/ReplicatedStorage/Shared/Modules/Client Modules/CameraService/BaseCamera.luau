@@ -8,9 +8,11 @@ local InputService      = game:GetService("UserInputService")
 local RunService        = game:GetService("RunService")
 local PlayerService     = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService      = game:GetService("TweenService")
 local Workspace         = game:GetService("Workspace")
 
 local CameraClass = require(script.Parent.Parent.Parent.Parent.Library.Classes.Miscellanous.CameraClass)
+local main_util   = require(ReplicatedStorage.Shared.Library.Util)
 
 ------------------------------------------------------------------------
 -- Tuning
@@ -51,6 +53,14 @@ local FREELOOK_DEBOUNCE     = 0.15
 
 local RECOIL_DECAY_SPEED = 8
 
+-- Hold breath / aiming FOV
+local HOLD_BREATH_FOV      = 40
+local HOLD_BREATH_IN_TIME  = 1
+local HOLD_BREATH_OUT_TIME = 0.5
+local AIM_FOV              = 50
+local AIM_FOV_IN_TIME      = 0.15  -- tweak for faster/slower zoom-in feel
+local AIM_FOV_OUT_TIME     = 0.12
+
 ------------------------------------------------------------------------
 -- Module setup
 ------------------------------------------------------------------------
@@ -69,6 +79,9 @@ local InputOptions = SettingsData:WaitForChild("Input Options")
 local Shoulder_Switch = InputOptions:WaitForChild("Shoulder Switch")
 local Free_Look       = InputOptions:WaitForChild("Free Look")
 local First_Person    = InputOptions:WaitForChild("First Person")
+
+local Aiming_Screengui        = LocalPlayer.PlayerGui.Aiming
+local hold_breath_image_label = Aiming_Screengui:WaitForChild("hold_breath")
 
 ------------------------------------------------------------------------
 -- Helpers
@@ -115,6 +128,86 @@ local function exitFreeLook(self, char)
 	InputService.MouseIconEnabled = false
 	local h = char and char:FindFirstChildOfClass("Humanoid")
 	if h then h.AutoRotate = false end
+end
+
+------------------------------------------------------------------------
+-- FOV tween helper
+-- Cancels any in-progress FOV tween before starting a new one so
+-- rapid aim-in/aim-out never stacks or fights itself.
+------------------------------------------------------------------------
+
+local activeFOVTween: Tween? = nil
+
+local function tweenFOV(target: number, duration: number)
+	if activeFOVTween then
+		activeFOVTween:Cancel()
+	end
+	activeFOVTween = TweenService:Create(
+		Camera,
+		TweenInfo.new(duration, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		{ FieldOfView = target }
+	)
+	activeFOVTween:Play()
+end
+
+------------------------------------------------------------------------
+-- Hold Breath (internal)
+------------------------------------------------------------------------
+
+local holdBreathTweens: {Tween} = {}
+
+local function cancelHoldBreathTweens()
+	for _, t in ipairs(holdBreathTweens) do
+		t:Cancel()
+	end
+	table.clear(holdBreathTweens)
+end
+
+local function holdBreath()
+	cancelHoldBreathTweens()
+	if activeFOVTween then activeFOVTween:Cancel() end
+
+	local imageTween = TweenService:Create(
+		hold_breath_image_label,
+		TweenInfo.new(HOLD_BREATH_IN_TIME),
+		{ ImageTransparency = 0 }
+	)
+	local fovTween = TweenService:Create(
+		Camera,
+		TweenInfo.new(HOLD_BREATH_IN_TIME, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		{ FieldOfView = HOLD_BREATH_FOV }
+	)
+
+	table.insert(holdBreathTweens, imageTween)
+	table.insert(holdBreathTweens, fovTween)
+
+	imageTween:Play()
+	fovTween:Play()
+end
+
+local function releaseBreath(isAiming: boolean)
+	cancelHoldBreathTweens()
+	if activeFOVTween then activeFOVTween:Cancel() end
+
+	local imageTween = TweenService:Create(
+		hold_breath_image_label,
+		TweenInfo.new(HOLD_BREATH_OUT_TIME),
+		{ ImageTransparency = 1 }
+	)
+	local targetFOV = isAiming and AIM_FOV or BASE_FOV
+	local fovTween = TweenService:Create(
+		Camera,
+		TweenInfo.new(HOLD_BREATH_OUT_TIME, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		{ FieldOfView = targetFOV }
+	)
+
+	table.insert(holdBreathTweens, imageTween)
+	table.insert(holdBreathTweens, fovTween)
+
+	imageTween:Play()
+	fovTween:Play()
+
+	main_util.applyRecoil(100, 10, 25)
 end
 
 ------------------------------------------------------------------------
@@ -168,9 +261,11 @@ function BaseCamera:Start()
 	self.CurrentFOV  = BASE_FOV
 	self.SmoothedPos = Camera.CFrame.Position
 
-	-- Recoil state
 	self.RecoilPitch = 0
 	self.RecoilYaw   = 0
+
+	self.IsAiming     = false
+	self.IsHoldBreath = false
 
 	local character = LocalPlayer.Character
 	local root      = character and character:FindFirstChild("HumanoidRootPart")
@@ -182,6 +277,39 @@ function BaseCamera:Start()
 
 	self.RaycastParams            = RaycastParams.new()
 	self.RaycastParams.FilterType = Enum.RaycastFilterType.Blacklist
+
+	------------------------------------------------------------------------
+	-- Character attribute watchers
+	------------------------------------------------------------------------
+	local function connectCharacterAttributes(char: Model)
+
+		char:GetAttributeChangedSignal("Aiming"):Connect(function()
+			local isAiming = char:GetAttribute("Aiming") == true
+			self.IsAiming = isAiming
+			-- Only touch FOV if hold breath isn't already controlling it
+			if not self.IsHoldBreath then
+				tweenFOV(
+					isAiming and AIM_FOV or BASE_FOV,
+					isAiming and AIM_FOV_IN_TIME or AIM_FOV_OUT_TIME
+				)
+			end
+		end)
+
+		char:GetAttributeChangedSignal("HoldBreathe"):Connect(function()
+			local isHolding = char:GetAttribute("HoldBreathe") ~= nil
+			if isHolding and not self.IsHoldBreath then
+				self.IsHoldBreath = true
+				holdBreath()
+			elseif not isHolding and self.IsHoldBreath then
+				self.IsHoldBreath = false
+				releaseBreath(self.IsAiming)
+			end
+		end)
+	end
+
+	if character then
+		connectCharacterAttributes(character)
+	end
 
 	self.Connections = {
 
@@ -218,13 +346,13 @@ function BaseCamera:Start()
 				self.IsRightShoulder  = not self.IsRightShoulder
 				self.TargetShoulder   = self.IsRightShoulder
 					and self.RightShoulderOffset or self.LeftShoulderOffset
-				
+
 				if LocalPlayer:GetAttribute("Current_Shoulder") == "Right" then
 					LocalPlayer:SetAttribute("Current_Shoulder", "Left")
 				else
 					LocalPlayer:SetAttribute("Current_Shoulder", "Right")
 				end
-				
+
 				task.delay(SHOULDER_DEBOUNCE, function() self.ShoulderDebounce = false end)
 
 			elseif keyMatches(pressedName, freeLookKey) then
@@ -307,6 +435,10 @@ function BaseCamera:Start()
 			self.ShoulderDebounce    = false
 			self.RecoilPitch         = 0
 			self.RecoilYaw           = 0
+			self.IsAiming            = false
+			self.IsHoldBreath        = false
+			cancelHoldBreathTweens()
+			if activeFOVTween then activeFOVTween:Cancel() end
 			exitFreeLook(self, newCharacter)
 
 			local r = newCharacter:WaitForChild("HumanoidRootPart")
@@ -315,6 +447,8 @@ function BaseCamera:Start()
 			self.FreeLookYaw   = self.CameraYaw
 			self.FreeLookPitch = 0
 			self.SmoothedPos   = r.Position + Vector3.new(0, getOffset("heightOffset", DEFAULT_HEIGHT), 0)
+
+			connectCharacterAttributes(newCharacter)
 		end),
 	}
 end
@@ -409,8 +543,11 @@ function BaseCamera:Update(dt: number)
 		ZOOM_LERP_SPEED, dt
 	)
 
-	self.CurrentFOV    = lerp(self.CurrentFOV, BASE_FOV + (moving and sprintT * (MAX_FOV - BASE_FOV) or 0), FOV_SPEED, dt)
-	--Camera.FieldOfView = self.CurrentFOV
+	-- Sprint FOV only runs when nothing else owns the FOV
+	if not self.IsAiming and not self.IsHoldBreath then
+		self.CurrentFOV = lerp(self.CurrentFOV, BASE_FOV + (moving and sprintT * (MAX_FOV - BASE_FOV) or 0), FOV_SPEED, dt)
+		Camera.FieldOfView = self.CurrentFOV
+	end
 
 	--------------------------------------------------------------------
 	-- 5. First-person mesh visibility
