@@ -1,39 +1,55 @@
 local module = {}
 
--- // Variables
-local player_service = game:GetService("Players")
-local replicatedstorage_service = game:GetService("ReplicatedStorage")
-local input_service = game:GetService("UserInputService")
+-- // Services
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
 
-local LocalPlayer = player_service.LocalPlayer
-local Character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
-local Humanoid = Character:WaitForChild("Humanoid")
+-- // Player
+local LocalPlayer = Players.LocalPlayer
 
+-- // Dynamic character refs (fixes respawn issues)
+local Character = nil
+local Humanoid = nil
+local RootPart = nil
+
+local function bindCharacter(char)
+	Character = char
+	Humanoid = char:WaitForChild("Humanoid")
+	RootPart = char:WaitForChild("HumanoidRootPart")
+end
+
+bindCharacter(LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait())
+LocalPlayer.CharacterAdded:Connect(bindCharacter)
+
+-- // Data
 local PlayerData = LocalPlayer:WaitForChild("PlayerData")
 local SettingsData = PlayerData:WaitForChild("Settings Data")
 local InputOptions = SettingsData:WaitForChild("Input Options")
 
 local SprintKey = InputOptions:WaitForChild("Sprint")
 
-local Stamina_Config = replicatedstorage_service.Shared.Library.Configuration.Character_Variables.Movement.Sprint
-local BaseSpeed = Stamina_Config:WaitForChild("BaseSpeed").Value
-local MaxSpeed = Stamina_Config:WaitForChild("MaxSpeed").Value
-local Tick_Debounce = Stamina_Config:WaitForChild("Tick_Debounce").Value
-local Tick_Speed = Stamina_Config:WaitForChild("Tick_Speed").Value
-local Speed_Increase = Stamina_Config:WaitForChild("Speed_Increase").Value
+local Sprint_Config = ReplicatedStorage.Shared.Library.Configuration.Character_Variables.Movement.Sprint
+local BaseSpeed = Sprint_Config:WaitForChild("BaseSpeed").Value
+local MaxSpeed = Sprint_Config:WaitForChild("MaxSpeed").Value
+local Tick_Debounce = Sprint_Config:WaitForChild("Tick_Debounce").Value
+local Tick_Speed = Sprint_Config:WaitForChild("Tick_Speed").Value
+local Speed_Increase = Sprint_Config:WaitForChild("Speed_Increase").Value
+
+local AimingUtils = require(LocalPlayer.PlayerGui:WaitForChild("Aiming"):WaitForChild("Utils"))
 
 -- // State
 local Sprinting = false
-local Increasing = false
+local LoopRunning = false
 
-local Key_States = {
-	["Forward"] = false,
-	["Backwards"] = false,
-	["Left"] = false,
-	["Right"] = false,
+local KeyStates = {
+	Forward = false,
+	Backwards = false,
+	Left = false,
+	Right = false,
 }
 
--- // Functions
+-- // Helpers
 local function getKeyName(value: string): string
 	return value:gsub("Enum.KeyCode.", "")
 end
@@ -42,34 +58,57 @@ local function getSprintKey()
 	return Enum.KeyCode[getKeyName(SprintKey.Value)]
 end
 
-local function resetSpeed()
-	Humanoid.WalkSpeed = BaseSpeed
+local function setSprintAttribute(state: boolean)
+	if Character then
+		Character:SetAttribute("Sprinting", state and true or nil)
+	end
 end
 
+local function resetSpeed()
+	if not Character or not Humanoid then return end
+
+	Sprinting = false          -- always clear this
+	setSprintAttribute(false)  -- always clear the attribute
+
+	if Character:GetAttribute("Aiming") then
+		AimingUtils.release_breath()
+	else
+		Humanoid.WalkSpeed = BaseSpeed
+	end
+end
+
+-- // Core loop
 local function sprintLoop()
-	if Increasing then return end
-	Increasing = true
+	if LoopRunning then return end
+	LoopRunning = true
+
+	setSprintAttribute(true)
 
 	task.wait(Tick_Debounce)
 
 	while Sprinting do
-		if Humanoid.WalkSpeed < MaxSpeed and Key_States["Forward"] == true and Key_States["Backwards"] == false then
-			Humanoid.WalkSpeed = math.min(
-				Humanoid.WalkSpeed + Speed_Increase,
-				MaxSpeed
-			)
+		if not Character or not Humanoid or not RootPart then break end
 
-			-- // print current velocity
-			local velocity = Character.HumanoidRootPart.AssemblyLinearVelocity
-			local true_speed = velocity.Magnitude
-
-
+		-- Cancel if aiming
+		if Character:GetAttribute("Aiming") then
+			AimingUtils.hold_breath()
+			break
 		end
-		
-		local velocity = Character.HumanoidRootPart.AssemblyLinearVelocity
-		local true_speed = velocity.Magnitude
 
-		if math.abs(true_speed - Humanoid.WalkSpeed) > 2 then
+		-- Only accelerate forward
+		if KeyStates.Forward and not KeyStates.Backwards then
+			if Humanoid.WalkSpeed < MaxSpeed then
+				Humanoid.WalkSpeed = math.min(
+					Humanoid.WalkSpeed + Speed_Increase,
+					MaxSpeed
+				)
+			end
+		end
+
+		-- Velocity check
+		local velocity = RootPart.AssemblyLinearVelocity.Magnitude
+
+		if math.abs(velocity - Humanoid.WalkSpeed) > 2 then
 			Sprinting = false
 			resetSpeed()
 			break
@@ -78,49 +117,50 @@ local function sprintLoop()
 		task.wait(Tick_Speed)
 	end
 
-	Increasing = false
+	LoopRunning = false
 end
 
--- // Connections
+-- // Input
 function module.start_module()
+	if Humanoid then
+		Humanoid.WalkSpeed = BaseSpeed
+	end
 
-	Humanoid.WalkSpeed = BaseSpeed
-
-	input_service.InputBegan:Connect(function(input, gameProcessed)
+	UserInputService.InputBegan:Connect(function(input, gameProcessed)
 		if gameProcessed then return end
+
 		if input.KeyCode == getSprintKey() then
 			Sprinting = true
-			sprintLoop()
+			task.spawn(sprintLoop) -- prevents yield blocking
 		end
 
 		if input.KeyCode == Enum.KeyCode.W then
-			Key_States["Forward"] = true
+			KeyStates.Forward = true
 		elseif input.KeyCode == Enum.KeyCode.S then
-			Key_States["Backwards"] = true
+			KeyStates.Backwards = true
 		elseif input.KeyCode == Enum.KeyCode.A then
-			Key_States["Left"] = true
+			KeyStates.Left = true
 		elseif input.KeyCode == Enum.KeyCode.D then
-			Key_States["Right"] = true
+			KeyStates.Right = true
 		end
 	end)
 
-	input_service.InputEnded:Connect(function(input)
+	UserInputService.InputEnded:Connect(function(input)
 		if input.KeyCode == getSprintKey() then
 			Sprinting = false
 			resetSpeed()
 		end
 
 		if input.KeyCode == Enum.KeyCode.W then
-			Key_States["Forward"] = false
+			KeyStates.Forward = false
 		elseif input.KeyCode == Enum.KeyCode.S then
-			Key_States["Backwards"] = false
+			KeyStates.Backwards = false
 		elseif input.KeyCode == Enum.KeyCode.A then
-			Key_States["Left"] = false
+			KeyStates.Left = false
 		elseif input.KeyCode == Enum.KeyCode.D then
-			Key_States["Right"] = false
+			KeyStates.Right = false
 		end
 	end)
-
 end
 
 return module

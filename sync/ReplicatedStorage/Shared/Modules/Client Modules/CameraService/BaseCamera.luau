@@ -410,7 +410,7 @@ function BaseCamera:Update(dt: number)
 	)
 
 	self.CurrentFOV    = lerp(self.CurrentFOV, BASE_FOV + (moving and sprintT * (MAX_FOV - BASE_FOV) or 0), FOV_SPEED, dt)
-	Camera.FieldOfView = self.CurrentFOV
+	--Camera.FieldOfView = self.CurrentFOV
 
 	--------------------------------------------------------------------
 	-- 5. First-person mesh visibility

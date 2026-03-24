@@ -1,8 +1,14 @@
 --!strict
 
+--////////////////////////////////////////////////////////
+-- Setup
+--////////////////////////////////////////////////////////
+
 local Character = script.Parent
 local Humanoid: Humanoid = Character:WaitForChild("Humanoid")
 local UIS = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+
 
 local Animations_Folder = game:GetService("ReplicatedStorage")
 	.Shared.Assets.Animations.Character
@@ -11,24 +17,32 @@ local Animations_Folder = game:GetService("ReplicatedStorage")
 local Animator: Animator = Humanoid:FindFirstChildOfClass("Animator") or Instance.new("Animator")
 Animator.Parent = Humanoid
 
--- // CONFIG
+--////////////////////////////////////////////////////////
+-- Config
+--////////////////////////////////////////////////////////
+
 local ANIMS = {
 	Stand_Idle = Animations_Folder.Idles.Stand_Idle.AnimationId,
 
 	Walk_Forward = Animations_Folder.Walking.Standing.Walk_Forward.AnimationId,
-	Walk_Left = Animations_Folder.Walking.Standing.Walk_Left.AnimationId,
-	Walk_Right = Animations_Folder.Walking.Standing.Walk_Right.AnimationId,
+	Walk_Left    = Animations_Folder.Walking.Standing.Walk_Left.AnimationId,
+	Walk_Right   = Animations_Folder.Walking.Standing.Walk_Right.AnimationId,
 
-	Sprint = Animations_Folder.Sprint.Sprint.AnimationId,
-	Sprint_Lean = Animations_Folder.Sprint.Sprint_Lean.AnimationId,
-	Sprint_Arms = Animations_Folder.Sprint.Sprint_Arms.AnimationId,
-	Sprint_Full = Animations_Folder.Sprint.Sprinting_Full.AnimationId,
+	Sprint        = Animations_Folder.Sprint.Sprint.AnimationId,
+	Sprint_Lean   = Animations_Folder.Sprint.Sprint_Lean.AnimationId,
+	Sprint_Arms   = Animations_Folder.Sprint.Sprint_Arms.AnimationId,
+	Sprint_Full   = Animations_Folder.Sprint.Sprinting_Full.AnimationId,
+
+	PrinceRifle_Sprint = Animations_Folder.Sprint.PrinceRifle_Sprint.AnimationId,
 
 	Jump = "rbxassetid://125750702",
 	Fall = "rbxassetid://180436148",
 }
 
--- // STATE
+--////////////////////////////////////////////////////////
+-- State
+--////////////////////////////////////////////////////////
+
 local Tracks: {[string]: AnimationTrack} = {}
 
 local ActiveTracks = {
@@ -44,8 +58,12 @@ local Current_Directions = {
 }
 
 local CurrentSpeed = 1
+local currentSprintOverlay: string? = nil
 
--- // LOAD
+--////////////////////////////////////////////////////////
+-- Animation Loading
+--////////////////////////////////////////////////////////
+
 local function loadAnimation(name: string, id: string): AnimationTrack
 	local anim = Instance.new("Animation")
 	anim.Name = name
@@ -68,11 +86,13 @@ for name, id in pairs(ANIMS) do
 	Tracks[name] = loadAnimation(name, id)
 end
 
--- // BASE
+--////////////////////////////////////////////////////////
+-- Base Animation Control
+--////////////////////////////////////////////////////////
+
 local function playBase(name: string, fade: number?)
 	local track = Tracks[name]
 	if not track then return end
-
 	if ActiveTracks.Base == track then return end
 
 	if ActiveTracks.Base then
@@ -83,7 +103,16 @@ local function playBase(name: string, fade: number?)
 	ActiveTracks.Base = track
 end
 
--- // OVERLAY
+local function setBaseSpeed(speed: number)
+	if ActiveTracks.Base then
+		ActiveTracks.Base:AdjustSpeed(speed)
+	end
+end
+
+--////////////////////////////////////////////////////////
+-- Overlay Control
+--////////////////////////////////////////////////////////
+
 local function playOverlay(name: string, fade: number?)
 	if ActiveTracks.Overlay[name] then return end
 
@@ -107,16 +136,13 @@ local function clearOverlays(fade: number?)
 		track:Stop(fade or 0.25)
 		ActiveTracks.Overlay[name] = nil
 	end
+	currentSprintOverlay = nil
 end
 
--- // SPEED
-local function setBaseSpeed(speed: number)
-	if ActiveTracks.Base then
-		ActiveTracks.Base:AdjustSpeed(speed)
-	end
-end
+--////////////////////////////////////////////////////////
+-- Input Tracking
+--////////////////////////////////////////////////////////
 
--- // INPUT
 UIS.InputBegan:Connect(function(input, gp)
 	if gp then return end
 
@@ -135,7 +161,27 @@ UIS.InputEnded:Connect(function(input, gp)
 	if input.KeyCode == Enum.KeyCode.D then Current_Directions.D = false end
 end)
 
--- // MOVEMENT
+--////////////////////////////////////////////////////////
+-- Sprint Animation Resolver (FIXED)
+--////////////////////////////////////////////////////////
+
+local function detectSprintOverlay(): string
+	local attr = Character:GetAttribute("Sprint_Animation")
+
+	if attr then
+		local name = attr .. "_Sprint"
+		if Tracks[name] then
+			return name
+		end
+	end
+
+	return "Sprint_Arms"
+end
+
+--////////////////////////////////////////////////////////
+-- Movement Logic
+--////////////////////////////////////////////////////////
+
 local function handleMovement(speed: number)
 	if speed <= 0.1 then
 		clearOverlays(0.3)
@@ -150,7 +196,9 @@ local function handleMovement(speed: number)
 	if walkspeed < 17 then
 		clearOverlays(0.25)
 
-		if Current_Directions.A and not Current_Directions.W then
+		if Current_Directions.S and not Current_Directions.W then
+			playBase("Walk_Forward", 0.2) -- replace if you add backward anim
+		elseif Current_Directions.A and not Current_Directions.W then
 			playBase("Walk_Left", 0.2)
 		elseif Current_Directions.D and not Current_Directions.W then
 			playBase("Walk_Right", 0.2)
@@ -161,13 +209,12 @@ local function handleMovement(speed: number)
 		local ratio = math.clamp(speed / walkspeed, 0, 1)
 		local targetSpeed = 0.9 + (ratio * 0.2)
 
-		CurrentSpeed = CurrentSpeed + (targetSpeed - CurrentSpeed) * 0.06
+		CurrentSpeed += (targetSpeed - CurrentSpeed) * 0.06
 		setBaseSpeed(CurrentSpeed)
-
 		return
 	end
 
-	-- SPRINT BASE (only when actually moving fast)
+	-- SPRINT BASE
 	if speed >= 20 then
 		playBase("Sprint", 0.2)
 	else
@@ -175,35 +222,64 @@ local function handleMovement(speed: number)
 		return
 	end
 
-	-- PHASES (WALKSPEED BASED — not raw velocity)
+	-- Lean
 	if walkspeed >= 17 then
 		playOverlay("Sprint_Lean", 0.3)
 	else
 		stopOverlay("Sprint_Lean", 0.3)
 	end
 
+	-- Arms (FIXED switching)
 	if walkspeed >= 22 then
-		playOverlay("Sprint_Arms", 0.3)
+		local animName = detectSprintOverlay()
+
+		if currentSprintOverlay ~= animName then
+			if currentSprintOverlay then
+				stopOverlay(currentSprintOverlay, 0.3)
+			end
+
+			playOverlay(animName, 0.3)
+			currentSprintOverlay = animName
+		end
 	else
-		stopOverlay("Sprint_Arms", 0.3)
+		if currentSprintOverlay then
+			stopOverlay(currentSprintOverlay, 0.3)
+			currentSprintOverlay = nil
+		end
 	end
 
+	-- Full
 	if walkspeed >= 24 then
 		playOverlay("Sprint_Full", 0.3)
 	else
 		stopOverlay("Sprint_Full", 0.3)
 	end
 
-	-- MICRO scaling
+	-- Speed scaling
 	local ratio = math.clamp(speed / walkspeed, 0, 1)
 	local targetSpeed = 1 + (ratio * 0.1)
 
-	CurrentSpeed = CurrentSpeed + (targetSpeed - CurrentSpeed) * 0.05
+	CurrentSpeed += (targetSpeed - CurrentSpeed) * 0.05
 	setBaseSpeed(CurrentSpeed)
 end
 
--- // EVENTS
-Humanoid.Running:Connect(handleMovement)
+--////////////////////////////////////////////////////////
+-- Movement Sampling (FIXED)
+--////////////////////////////////////////////////////////
+
+RunService.RenderStepped:Connect(function()
+	local root = Humanoid.RootPart
+	if not root then return end
+
+	local velocity = root.Velocity
+	local horizontal = Vector3.new(velocity.X, 0, velocity.Z).Magnitude
+
+	handleMovement(horizontal)
+end)
+
+--////////////////////////////////////////////////////////
+-- State Events
+--////////////////////////////////////////////////////////
 
 Humanoid.Jumping:Connect(function()
 	clearOverlays(0.2)
@@ -225,5 +301,8 @@ Humanoid.Died:Connect(function()
 	end
 end)
 
--- INIT
+--////////////////////////////////////////////////////////
+-- Init
+--////////////////////////////////////////////////////////
+
 playBase("Stand_Idle", 0.2)

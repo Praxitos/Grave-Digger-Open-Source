@@ -98,7 +98,7 @@ function BaseTool:on_give(tool: Tool, holster: Model?, model: Model?)
 	self._activationConnection = tool.Activated:Connect(function()
 		self:activate()
 	end)
-
+	
 	-- optional subclass hook
 	if self._on_give then
 		self:_on_give(tool, holster, model)
@@ -181,6 +181,10 @@ end
 -- activation (must be overridden)
 function BaseTool:activate()
 	error(self.className .. " missing activate()")
+end
+
+function BaseTool:_if_sprinting()
+	return LOCAL_PLAYER.Character:GetAttribute("Sprinting")
 end
 
 -- cleanup (important for memory leaks)
