@@ -545,6 +545,7 @@ function BaseCamera:Update(dt: number)
 
 	-- Sprint FOV only runs when nothing else owns the FOV
 	if not self.IsAiming and not self.IsHoldBreath then
+		self.CurrentFOV = Camera.FieldOfView 
 		self.CurrentFOV = lerp(self.CurrentFOV, BASE_FOV + (moving and sprintT * (MAX_FOV - BASE_FOV) or 0), FOV_SPEED, dt)
 		Camera.FieldOfView = self.CurrentFOV
 	end

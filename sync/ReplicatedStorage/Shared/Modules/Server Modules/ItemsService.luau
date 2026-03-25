@@ -79,6 +79,19 @@ function module.give_item(player: Player, item: string)
 
 				print("Created Motor6D:", part0.Name, "->", part1.Name)
 			end
+			
+			-- // has a round it wants to be weld too
+			if object.Round then
+				local object_bullet_clone = object.Round:Clone()
+				object_bullet_clone.Parent = player.Character["Right Arm"]
+				
+				local motor6d = Instance.new("Motor6D")
+				motor6d.Parent = player.Character["Right Arm"]
+				motor6d.Part0 = player.Character["Right Arm"]
+				motor6d.Part1 = object_bullet_clone
+				
+				print("Succesfully gave round")
+			end
 		end)
 		
 		tool.Unequipped:Connect(function()

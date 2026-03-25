@@ -15,6 +15,7 @@ local LOCAL_PLAYER = Players.LocalPlayer
 local BaseTool = {}
 BaseTool.__index = BaseTool
 
+
 export type BaseTool = typeof(setmetatable({} :: {
 	className: "BaseTool",
 	name: string,
@@ -142,6 +143,44 @@ function BaseTool:equip()
 	if self._on_equip then
 		self:_on_equip()
 	end
+end
+
+function BaseTool:ammo_check()
+	if not self.RegisteredAnimations or not self.RegisteredAnimations.Check then 
+		print("Has no check animation, assuming there is no built in check system...") 
+		return 
+	end
+	if self.Firing or self.Reloading or self.Cycling or self.Alting then return end
+
+	local ammo_check_utils
+	local ammo_check_part
+	
+	if not workspace.CurrentCamera:FindFirstChild("Ammo_Check") then
+		ammo_check_part = game.ReplicatedStorage.Shared.Assets.Effects.AmmoUI.Ammo_Check:Clone()
+		ammo_check_part.Parent = game.Workspace.CurrentCamera
+		ammo_check_utils = require(ammo_check_part.Utils)
+	else
+		ammo_check_part = workspace.CurrentCamera.Ammo_Check
+		ammo_check_utils = require(workspace.CurrentCamera.Ammo_Check.Utils)	
+	end
+
+	
+	self.RegisteredAnimations.Check:Play()
+	
+	local hrp = LOCAL_PLAYER.Character.HumanoidRootPart
+	ammo_check_part.Position = hrp.Position + hrp.CFrame.RightVector * 2 + Vector3.new(0, 1.5, 0)
+	
+	local weld = Instance.new("WeldConstraint")
+	weld.Part0 = ammo_check_part
+	weld.Part1 = hrp
+	weld.Parent = ammo_check_part
+	local percentage = math.clamp(self.Capacity / self.Max_Capacity, 0, 1)
+	ammo_check_utils.utils(self.Ammo_Type, percentage, false)
+end
+
+function BaseTool:notify(text)
+	local Notifications_util = require(game.Players.LocalPlayer.PlayerGui:WaitForChild("Notifications"):WaitForChild("Utils"))
+	Notifications_util.send_notification(LOCAL_PLAYER, text)
 end
 
 -- unequip logic (shared)
