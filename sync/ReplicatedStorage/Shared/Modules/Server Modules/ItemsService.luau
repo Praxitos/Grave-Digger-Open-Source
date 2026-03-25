@@ -90,6 +90,8 @@ function module.give_item(player: Player, item: string)
 				motor6d.Part0 = player.Character["Right Arm"]
 				motor6d.Part1 = object_bullet_clone
 				
+				motor6d.C1 = CFrame.new(0,-0.78,0)
+				
 				print("Succesfully gave round")
 			end
 		end)
