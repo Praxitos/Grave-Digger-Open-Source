@@ -40,13 +40,12 @@ local function setup_player(player)
    end)
 
    holsters_folder.ChildAdded:Connect(function(child: BoolValue)
-        print("Detected child added")
+        print("Detected child added for:", child.Name)
 		if not tool_holsters_reference_folder:FindFirstChild(child.Name) and not gun_holsters_reference_folder:FindFirstChild(child.Name) then warn("Received holster child for:", child.Name, "but not reference found...") end
 
         print("Child added, does have reference...")
 
 		local reference = tool_holsters_reference_folder:FindFirstChild(child.Name) or gun_holsters_reference_folder:FindFirstChild(child.Name)
-		reference.Parent = player.Character.CharacterData.Rendered_Holsters
         	local primary_part = reference.PrimaryPart
 		if not primary_part then
 			warn("ToolService: No primary part found for holster", child.Name)

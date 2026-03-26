@@ -34,6 +34,7 @@ local ANIMS = {
 	Sprint_Full   = Animations_Folder.Sprint.Sprinting_Full.AnimationId,
 
 	PrinceRifle_Sprint = Animations_Folder.Sprint.PrinceRifle_Sprint.AnimationId,
+	GraceRevolver_Sprint = Animations_Folder.Sprint.GraceRevolver_Sprint.AnimationId,
 
 	Jump = "rbxassetid://125750702",
 	Fall = "rbxassetid://180436148",

@@ -174,23 +174,28 @@ function BaseTool:unequip()
 	local humanoid = character:FindFirstChildOfClass("Humanoid")
 	if not humanoid then return end
 
+	-- 1. Let the subclass cancel in-flight coroutines and disconnect input FIRST,
+	--    while animations are still alive so any Stopped:Wait() can resolve.
+	if self._on_unequip then
+		self:_on_unequip()
+	end
+
+	-- 2. Now it is safe to stop all animations — no coroutine is waiting on them.
 	if self.RegisteredAnimations then
 		for _, anim in pairs(self.RegisteredAnimations) do
 			anim:Stop()
 		end
 	end
 
+	-- 3. Unequip the tool from the humanoid.
+	humanoid:UnequipTools()
+
+	-- 4. Play the unequip animation if present.
 	if self.RegisteredAnimations and self.RegisteredAnimations.Unequip then
 		self.RegisteredAnimations.Unequip:Play()
 		if self.unequip_wait == true then
 			self.RegisteredAnimations.Unequip.Stopped:Wait()
 		end
-	end
-
-	humanoid:UnequipTools()
-
-	if self._on_unequip then
-		self:_on_unequip()
 	end
 
 	self.actual_model = nil
@@ -276,6 +281,15 @@ function BaseTool:_initShoulderTracking()
 			self:_onShoulderChanged()
 		end
 	end)
+end
+
+-- Disconnects the shoulder attribute watcher. Call on unequip so the signal
+-- does not fire and try to swap aim anims on an unequipped tool.
+function BaseTool:_stopShoulderTracking()
+	if self._shoulderChangedConn then
+		self._shoulderChangedConn:Disconnect()
+		self._shoulderChangedConn = nil
+	end
 end
 
 -- // Aim Tracking (shared by all shoulder-aimed tools)
@@ -455,6 +469,7 @@ function BaseTool:emit_effect(
 
 	print("Effect emitted")
 end
+
 -- // Cleanup
 
 function BaseTool:destroy()
@@ -462,10 +477,7 @@ function BaseTool:destroy()
 		self._activationConnection:Disconnect()
 		self._activationConnection = nil
 	end
-	if self._shoulderChangedConn then
-		self._shoulderChangedConn:Disconnect()
-		self._shoulderChangedConn = nil
-	end
+	self:_stopShoulderTracking()
 	self:_stopAimTracking()
 	self:_resetMotor6D()
 

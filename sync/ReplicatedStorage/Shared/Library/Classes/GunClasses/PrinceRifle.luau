@@ -158,7 +158,7 @@ function PrinceRifle.new(info: Types.BaseToolCreateInfo): PrinceRifle
 	self.recoil       = 10
 	self.recoil_count = 6
 
-	self.unequip_wait     = false
+	self.unequip_wait     = true
 	self.Cycled           = true
 	self.Firing           = false
 	self.Cycling          = false
@@ -176,7 +176,8 @@ function PrinceRifle.new(info: Types.BaseToolCreateInfo): PrinceRifle
 	})
 
 	self:_initShoulderTracking()
-	self:_initInput()
+	-- Input is connected in _on_equip, not here, so it can be cleanly
+	-- disconnected on unequip and reconnected on re-equip.
 
 	return self
 end
@@ -256,7 +257,7 @@ end
 
 -- // Input
 
-function PrinceRifle:_initInput()
+function PrinceRifle:_connectInput()
 	self._inputBeganConn = UserInputService.InputBegan:Connect(function(input, gameProcessed)
 		if gameProcessed then return end
 
@@ -278,6 +279,11 @@ function PrinceRifle:_initInput()
 			self:aim()
 		end
 	end)
+end
+
+function PrinceRifle:_disconnectInput()
+	if self._inputBeganConn then self._inputBeganConn:Disconnect(); self._inputBeganConn = nil end
+	if self._inputEndedConn then self._inputEndedConn:Disconnect(); self._inputEndedConn = nil end
 end
 
 -- // Shoulder
@@ -368,6 +374,8 @@ end
 function PrinceRifle:cycle()
 	if self.Cycling then return end
 	self.Cycling = true
+	
+	self:_stopAllExcept()
 
 	self:_playAnim("Cycle").Stopped:Wait()
 
@@ -416,10 +424,10 @@ function PrinceRifle:fire()
 	fireTrack.Stopped:Once(function()
 		self:_restoreBase()
 	end)
-	
+
 	self:emit_effect(muzzle_flash, {"smoke_medium"}, game.Players.LocalPlayer.Character.CharacterData.Equipment.PrinceRifle.PrinceRifle_Muzzle, 1, false)
-	print("Fire emit")	
-		
+	print("Fire emit")
+
 	task.wait(FIRE_RATE)
 	self.Firing = false
 
@@ -501,6 +509,8 @@ end
 
 function PrinceRifle:_on_equip()
 	self:_cacheMotor6D()
+	self:_connectInput()
+	self:_initShoulderTracking()
 	game.Players.LocalPlayer.Character:SetAttribute("Sprint_Animation", "PrinceRifle")
 
 	for _, animation: AnimationTrack in pairs(self.RegisteredAnimations) do
@@ -524,6 +534,8 @@ end
 
 function PrinceRifle:_on_unequip()
 	self._reloadCancelled = true
+	self:_disconnectInput()
+	self:_stopShoulderTracking()
 	self:_stopLayer(2)
 	self:_stopAimTracking()
 	self:_resetMotor6D()
@@ -546,8 +558,7 @@ end
 -- // Cleanup
 
 function PrinceRifle:Destroy()
-	if self._inputBeganConn then self._inputBeganConn:Disconnect() end
-	if self._inputEndedConn then self._inputEndedConn:Disconnect() end
+	self:_disconnectInput()
 	BaseTool.destroy(self)
 end
 

@@ -86,10 +86,11 @@ local function create_slot_ui(slotNumber, slot)
 end
 
 local function update_slot_ui(slot)
-	if not slot.UI then
+	
+	
+	if not slot and not slot.UI then
 		return
 	end
-
 	slot.UI.ImageLabel.Image = (slot.Tool and slot.Tool.item_image) or empty_icon
 end
 
@@ -114,7 +115,7 @@ local function set_slot_black(key)
 
 	tween_slot(ui, {
 		BackgroundColor3 = Color3.fromRGB(0,0,0),
-		ImageColor3      = Color3.fromRGB(255,255,255),
+		ImageColor3      = Color3.fromRGB(0,0,0),
 		TextColor3       = Color3.fromRGB(0,0,0),
 	})
 end
@@ -317,8 +318,14 @@ function module.start_module()
 				if current_equipped == slot.Tool then
 					slot.Tool:unequip()
 					current_equipped = nil
+
+					selected_key = nil
+					update_highlight(nil) -- force all slots to black
 				else
 					equip_tool(slot.Tool)
+
+					selected_key = key
+					update_highlight(key)
 				end
 			end
 		end
