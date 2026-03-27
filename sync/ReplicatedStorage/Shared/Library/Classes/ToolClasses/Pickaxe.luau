@@ -75,7 +75,7 @@ function Pickaxe.new(PickaxeCreateInfo: Types.BaseToolCreateInfo): Pickaxe
 		Unequip = Animations_Folder.Tools.Pickaxes.Regular.Pickaxe_Unequip
 	}
 
-	self.mining_power = 6
+	self.mining_power = 10
 	self._activationConnection = nil
 
 	return self

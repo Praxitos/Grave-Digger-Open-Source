@@ -26,38 +26,6 @@ local muzzle_flash = Effects_Folder.Muzzle_Flash
 local CYCLE_REST_TIME = 0.15
 local FIRE_RATE       = 0.3
 
--- // Animation Priority Layers
---
---  LAYER 0 - base idle/aim:  Hold, Aim, Aim_Left
---  LAYER 1 - action overlay: Fire, Fire_Left, Cycle, Alt_Mode_On/Off
---  LAYER 2 - full takeover:  Reload_*, Draw, Unequip, Check
---
--- Rule:
---  - Layer 0 only replaces other layer 0 tracks.
---  - Layer 1 only replaces other layer 1 tracks, so base aim/hold can keep playing underneath.
---  - Layer 2 takes over completely and stops everything below it.
-
-local ANIM_LAYER: {[string]: number} = {
-	Hold         = 0,
-	Aim          = 0,
-	Aim_Left     = 0,
-
-	Fire         = 1,
-	Fire_Left    = 1,
-	Cycle        = 1,
-	Alt_Mode_On  = 1,
-	Alt_Mode_Off = 1,
-
-	Draw         = 2,
-	Unequip      = 2,
-	Check        = 2,
-	Reload_Empty = 2,
-	Reload_Start = 2,
-	Reload_Loop  = 2,
-	Reload_End   = 2,
-	Reload_Alt   = 2,
-}
-
 -- // Class
 
 local PrinceRifle = {}
@@ -176,82 +144,50 @@ function PrinceRifle.new(info: Types.BaseToolCreateInfo): PrinceRifle
 	})
 
 	self:_initShoulderTracking()
-	-- Input is connected in _on_equip, not here, so it can be cleanly
-	-- disconnected on unequip and reconnected on re-equip.
 
 	return self
 end
 
--- // Animation Layer System
+-- // Internal: is any action currently running?
 
--- Plays `name`.
--- Layer 0 replaces only layer 0.
--- Layer 1 replaces only layer 1, preserving the base track underneath.
--- Layer 2 stops everything and takes over.
-function PrinceRifle:_playAnim(name: string): AnimationTrack
-	local anims = self.RegisteredAnimations
-	local track = anims[name]
-	assert(track, "PrinceRifle: unknown animation '" .. tostring(name) .. "'")
-
-	local myLayer = ANIM_LAYER[name] or 0
-
-	for trackName, layer in pairs(ANIM_LAYER) do
-		local shouldStop = false
-
-		if myLayer == 2 then
-			shouldStop = layer <= 2
-		else
-			shouldStop = layer == myLayer
-		end
-
-		if shouldStop then
-			local t = anims[trackName]
-			if t and t ~= track and t.IsPlaying then
-				t:Stop()
-			end
-		end
-	end
-
-	track:Play()
-	return track
+-- Returns true if any exclusive action is in flight.
+-- Used to gate _restoreBase so it never steps on an active coroutine.
+function PrinceRifle:_isBusy(): boolean
+	return self.Firing or self.Cycling or self.Reloading or self.Alting
 end
 
--- Stops all tracks at or below `maxLayer`.
-function PrinceRifle:_stopLayer(maxLayer: number)
-	local anims = self.RegisteredAnimations
-	if not anims then return end
+-- // Base animation restore
 
-	for trackName, layer in pairs(ANIM_LAYER) do
-		if layer <= maxLayer then
-			local t = anims[trackName]
-			if t and t.IsPlaying then
-				t:Stop()
-			end
-		end
-	end
-end
-
--- Restores the correct base-layer track for the current Aiming + shoulder state,
--- but only if no action or takeover track is currently running.
+-- Plays whichever layer-0 track is correct for current state.
+-- ONLY call this when you are certain no other action is running.
 function PrinceRifle:_restoreBase()
+	if self:_isBusy() then return end
+	if not self.RegisteredAnimations then return end
+
 	local anims = self.RegisteredAnimations
-	if not anims then return end
-	if self.Reloading then return end
 
-	for trackName, layer in pairs(ANIM_LAYER) do
-		if layer >= 1 and anims[trackName] and anims[trackName].IsPlaying then
-			return
-		end
-	end
-
+	-- Stop both aim tracks cleanly before replaying the correct one,
+	-- so we never have two layer-0 tracks blending at once.
 	if self.Aiming then
 		if self.current_shoulder == "Right" then
-			self:_playAnim("Aim")
+			if anims.Aim_Left and anims.Aim_Left.IsPlaying then
+				anims.Aim_Left:Stop()
+			end
+			if anims.Aim and not anims.Aim.IsPlaying then
+				anims.Aim:Play()
+			end
 		else
-			self:_playAnim("Aim_Left")
+			if anims.Aim and anims.Aim.IsPlaying then
+				anims.Aim:Stop()
+			end
+			if anims.Aim_Left and not anims.Aim_Left.IsPlaying then
+				anims.Aim_Left:Play()
+			end
 		end
 	else
-		self:_playAnim("Hold")
+		if anims.Aim     and anims.Aim.IsPlaying     then anims.Aim:Stop()     end
+		if anims.Aim_Left and anims.Aim_Left.IsPlaying then anims.Aim_Left:Stop() end
+		if anims.Hold    and not anims.Hold.IsPlaying then anims.Hold:Play()   end
 	end
 end
 
@@ -276,7 +212,7 @@ function PrinceRifle:_connectInput()
 		if gameProcessed then return end
 
 		if input.UserInputType == Enum.UserInputType.MouseButton2 then
-			self:aim()
+			self:end_aiming()
 		end
 	end)
 end
@@ -289,32 +225,44 @@ end
 -- // Shoulder
 
 -- Called by BaseTool when Current_Shoulder attribute changes.
--- Only swaps the base-layer aim tracks - never touches layer 1 or 2.
+-- Guards every busy state so it never races with an in-flight action.
+-- The deferred C0 re-cache in BaseTool._initShoulderTracking means
+-- _leftShoulderC0/_rightShoulderC0 will be stale for exactly one frame
+-- after a swap — we must not let _restoreBase kick off a new animation
+-- during that window or the lerp loop will snap to the wrong origin.
 function PrinceRifle:_onShoulderChanged()
-	if not self.Aiming or self.Reloading then return end
-
-	local anims = self.RegisteredAnimations
-	if self.current_shoulder == "Right" then
-		if anims.Aim_Left.IsPlaying then anims.Aim_Left:Stop() end
-		if not anims.Aim.IsPlaying then anims.Aim:Play() end
-	else
-		if anims.Aim.IsPlaying then anims.Aim:Stop() end
-		if not anims.Aim_Left.IsPlaying then anims.Aim_Left:Play() end
+	if self:_isBusy() then
+		-- An action is running; it will call _restoreBase when it finishes,
+		-- which will pick up the new shoulder value at that point.
+		return
 	end
+	if not self.Aiming then return end
+
+	-- Use task.defer to match the same-frame re-cache defer in BaseTool,
+	-- so our animation swap lands AFTER the new C0 is committed.
+	task.defer(function()
+		-- Re-check busy inside the defer; something may have started
+		-- in the one frame gap.
+		if self:_isBusy() then return end
+		if not self.Aiming then return end
+		self:_restoreBase()
+	end)
 end
 
 -- // Tool Actions
 
 function PrinceRifle:set_alt()
-	if self.Alting or self.Reloading or self.Firing or self.Cycling then return end
+	if self:_isBusy() then return end
 	self.Alting = true
 
 	if self.Alt_Mode then
-		self:_playAnim("Alt_Mode_Off").Stopped:Wait()
+		self.RegisteredAnimations.Alt_Mode_Off:Play()
+		self.RegisteredAnimations.Alt_Mode_Off.Stopped:Wait()
 		self.Alt_Mode = false
 		self:notify("Firemode switched to Single Fire")
 	else
-		self:_playAnim("Alt_Mode_On").Stopped:Wait()
+		self.RegisteredAnimations.Alt_Mode_On:Play()
+		self.RegisteredAnimations.Alt_Mode_On.Stopped:Wait()
 		self.Alt_Mode = true
 		self:notify("Firemode switched to Repeating Fire")
 	end
@@ -327,9 +275,12 @@ end
 function PrinceRifle:end_aiming()
 	self.Aiming = false
 	self:_stopAimTracking()
+	local anims = self.RegisteredAnimations
+	if not anims then return end
 
-	local aimAnim = self.RegisteredAnimations.Aim
-	if aimAnim.IsPlaying then
+	-- Reverse-play Aim back to its start frame, then stop.
+	local aimAnim = anims.Aim
+	if aimAnim and aimAnim.IsPlaying then
 		aimAnim.TimePosition = 1
 		aimAnim:AdjustSpeed(-1)
 		aimAnim.Stopped:Once(function()
@@ -337,13 +288,16 @@ function PrinceRifle:end_aiming()
 		end)
 	end
 
-	local aimLeftAnim = self.RegisteredAnimations.Aim_Left
-	if aimLeftAnim.IsPlaying then
+	local aimLeftAnim = anims.Aim_Left
+	if aimLeftAnim and aimLeftAnim.IsPlaying then
 		aimLeftAnim:Stop()
 	end
 
-	if not self.Cycling and not self.Reloading then
-		self:_playAnim("Hold")
+	-- Only restore Hold if nothing else is running.
+	if not self:_isBusy() then
+		if anims.Hold and not anims.Hold.IsPlaying then
+			anims.Hold:Play()
+		end
 	end
 
 	game.Players.LocalPlayer.Character:SetAttribute("Aiming", false)
@@ -351,38 +305,50 @@ end
 
 function PrinceRifle:aim()
 	if self:_if_sprinting() then return end
-	if self.Reloading then return end
 
 	if not self.Aiming then
+		if self:_isBusy() then return end
 		self.Aiming = true
 		self:_startAimTracking()
-		self:_stopLayer(0)
+
+		-- Stop Hold before playing aim so they don't blend.
+		local anims = self.RegisteredAnimations
+		if anims and anims.Hold and anims.Hold.IsPlaying then
+			anims.Hold:Stop()
+		end
 
 		if self.current_shoulder == "Right" then
-			self:_playAnim("Aim")
+			if anims then anims.Aim:Play() end
 		else
-			self:_playAnim("Aim_Left")
+			if anims then anims.Aim_Left:Play() end
 		end
 
 		game.Players.LocalPlayer.Character:SetAttribute("Aiming", true)
-	else
-		self:end_aiming()
 	end
 end
 
--- Bolt cycle: layer-1 action that plays over the base aim/hold track.
+-- Bolt cycle: plays over the base aim/hold track.
 function PrinceRifle:cycle()
 	if self.Cycling then return end
 	self.Cycling = true
-	
-	self:_stopAllExcept()
 
-	self:_playAnim("Cycle").Stopped:Wait()
+	-- Stop only the overlay tracks (fire anims), not the base aim/hold.
+	-- This prevents the rifle model from jumping when cycling after a shot.
+	local anims = self.RegisteredAnimations
+	if anims then
+		if anims.Fire      and anims.Fire.IsPlaying      then anims.Fire:Stop()      end
+		if anims.Fire_Left and anims.Fire_Left.IsPlaying then anims.Fire_Left:Stop() end
+	end
+
+	anims.Cycle:Play()
+	anims.Cycle.Stopped:Wait()
 
 	task.wait(CYCLE_REST_TIME)
 	self.Cycled  = true
 	self.Cycling = false
 
+	-- _restoreBase is now safe to call: Cycling is false, and we haven't
+	-- touched the base track, so if it's still playing nothing changes.
 	self:_restoreBase()
 end
 
@@ -391,7 +357,6 @@ function PrinceRifle:fire()
 		self:Reload()
 		return
 	end
-
 	if self.Firing then return end
 	self.Firing = true
 
@@ -409,24 +374,31 @@ function PrinceRifle:fire()
 	local camera = workspace.CurrentCamera
 	self.Caster:Fire(muzzle.Position, camera.CFrame.LookVector.Unit, 1000, self.CasterBehavior)
 
-	local fireTrack: AnimationTrack
-	if self.current_shoulder == "Right" then
-		fireTrack = self:_playAnim("Fire")
-	else
-		fireTrack = self:_playAnim("Fire_Left")
-	end
+	local anims    = self.RegisteredAnimations
+	local fireAnim = (self.current_shoulder == "Right") and anims.Fire or anims.Fire_Left
 
 	self.Cycled   = false
 	self.Capacity -= 1
 
 	Util.applyRecoil(self.recoil, self.recoil_count, 10, false)
 
-	fireTrack.Stopped:Once(function()
-		self:_restoreBase()
+	fireAnim:Play()
+
+	-- When the fire animation ends, only restore base if nothing else
+	-- has taken over in the meantime (e.g. cycle was queued immediately).
+	fireAnim.Stopped:Once(function()
+		if not self.Cycling and not self.Reloading and not self.Alting then
+			self:_restoreBase()
+		end
 	end)
 
-	self:emit_effect(muzzle_flash, {"smoke_medium"}, game.Players.LocalPlayer.Character.CharacterData.Equipment.PrinceRifle.PrinceRifle_Muzzle, 1, false)
-	print("Fire emit")
+	self:emit_effect(
+		muzzle_flash,
+		{"smoke_medium"},
+		game.Players.LocalPlayer.Character.CharacterData.Equipment.PrinceRifle.PrinceRifle_Muzzle,
+		1,
+		false
+	)
 
 	task.wait(FIRE_RATE)
 	self.Firing = false
@@ -436,10 +408,12 @@ function PrinceRifle:fire()
 	end
 end
 
--- Alt reload: layer-2 takeover just for the lever-action slap animation.
+-- Alt reload: lever-action slap animation.
 function PrinceRifle:_alt_reload()
-	self:_playAnim("Reload_Alt").Stopped:Wait()
-	self.Cycled = true
+	local anims = self.RegisteredAnimations
+	anims.Reload_Alt:Play()
+	anims.Reload_Alt.Stopped:Wait()
+	self.Cycled   = true
 	self.Capacity += 1
 	self:_restoreBase()
 end
@@ -449,36 +423,46 @@ function PrinceRifle:Reload()
 	if self.Capacity >= self.Max_Capacity then return end
 
 	if self.Aiming then
-		self.Aiming = false
-		self:_stopAimTracking()
-		game.Players.LocalPlayer.Character:SetAttribute("Aiming", false)
+		self:end_aiming()
 	end
 
-	self:_stopLayer(2)
+	-- Stop everything cleanly before entering the reload coroutine.
+	self:_stopAllExcept(nil)
+
 	self.Reloading        = true
 	self._reloadCancelled = false
 
+	local anims = self.RegisteredAnimations
+
 	if self.Capacity == 0 then
-		self:_playAnim("Reload_Empty").Stopped:Wait()
+		anims.Reload_Empty:Play()
+		anims.Reload_Empty.Stopped:Wait()
 	else
-		self:_playAnim("Reload_Start").Stopped:Wait()
+		anims.Reload_Start:Play()
+		anims.Reload_Start.Stopped:Wait()
 	end
 
 	while self.Capacity < self.Max_Capacity and not self._reloadCancelled do
-		self:_playAnim("Reload_Loop").Stopped:Wait()
+		anims.Reload_Loop:Play()
+		anims.Reload_Loop.Stopped:Wait()
 		if self._reloadCancelled then break end
 
 		self.Capacity += 1
 
 		if not self.Cycled then
+			-- cycle() is now safe to call inline since it only stops fire tracks.
 			self:cycle()
 		end
 	end
 
 	if not self._reloadCancelled then
-		self:_playAnim("Reload_End").Stopped:Wait()
+		anims.Reload_End:Play()
+		anims.Reload_End.Stopped:Wait()
 	else
-		self:_stopLayer(2)
+		-- Cancelled mid-reload: stop whatever was playing.
+		if anims.Reload_Loop  and anims.Reload_Loop.IsPlaying  then anims.Reload_Loop:Stop()  end
+		if anims.Reload_Start and anims.Reload_Start.IsPlaying then anims.Reload_Start:Stop() end
+		if anims.Reload_Empty and anims.Reload_Empty.IsPlaying then anims.Reload_Empty:Stop() end
 	end
 
 	self.Reloading        = false
@@ -492,17 +476,13 @@ function PrinceRifle:activate()
 	if self.Firing or self.Cycling or self.Reloading then return end
 
 	if not self.Cycled then
-		task.spawn(function()
-			self:cycle()
-		end)
+		task.spawn(function() self:cycle() end)
 		return
 	end
 
 	if not self.Aiming then return end
 
-	task.spawn(function()
-		self:fire()
-	end)
+	task.spawn(function() self:fire() end)
 end
 
 -- // BaseTool Hooks
@@ -536,7 +516,6 @@ function PrinceRifle:_on_unequip()
 	self._reloadCancelled = true
 	self:_disconnectInput()
 	self:_stopShoulderTracking()
-	self:_stopLayer(2)
 	self:_stopAimTracking()
 	self:_resetMotor6D()
 

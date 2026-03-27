@@ -80,7 +80,7 @@ local Shoulder_Switch = InputOptions:WaitForChild("Shoulder Switch")
 local Free_Look       = InputOptions:WaitForChild("Free Look")
 local First_Person    = InputOptions:WaitForChild("First Person")
 
-local Aiming_Screengui        = LocalPlayer.PlayerGui.Aiming
+local Aiming_Screengui        = LocalPlayer.PlayerGui:WaitForChild("Aiming")
 local hold_breath_image_label = Aiming_Screengui:WaitForChild("hold_breath")
 
 ------------------------------------------------------------------------

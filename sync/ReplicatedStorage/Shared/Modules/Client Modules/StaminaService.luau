@@ -102,7 +102,10 @@ local function sprintLoop()
 			break
 		end
 
-		setSprintAttribute(true)
+		-- // only apply sprint attribute at 20 walkspeed
+		if Humanoid.WalkSpeed > 20 then
+			setSprintAttribute(true)
+		end
 
 		-- Only accelerate forward
 		if KeyStates.Forward and not KeyStates.Backwards then

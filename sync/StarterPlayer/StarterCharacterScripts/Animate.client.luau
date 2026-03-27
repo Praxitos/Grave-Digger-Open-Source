@@ -179,6 +179,18 @@ local function detectSprintOverlay(): string
 	return "Sprint_Arms"
 end
 
+
+--////////////////////////////////////////////////////////
+-- Animation Full Stopper
+--////////////////////////////////////////////////////////
+
+local function stop_animations()
+	-- // stop all animations playing on the humanoid
+	for _, track in pairs(Humanoid:GetPlayingAnimationTracks()) do
+		track:Stop()
+	end
+end
+
 --////////////////////////////////////////////////////////
 -- Movement Logic
 --////////////////////////////////////////////////////////

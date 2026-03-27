@@ -150,7 +150,7 @@ function GraceRevolver.new(info: Types.BaseToolCreateInfo): GraceRevolver
 	}
 
 	self.damage       = 25
-	self.Max_Capacity = 6   -- 6-round cylinder
+	self.Max_Capacity = 6
 	self.Capacity     = 6
 	self.Ammo_Type    = ".45 Lead"
 	self.recoil       = 8
@@ -173,17 +173,18 @@ function GraceRevolver.new(info: Types.BaseToolCreateInfo): GraceRevolver
 	})
 
 	self:_initShoulderTracking()
-	-- Input connected in _on_equip so it is cleanly disconnected on unequip.
 
 	return self
 end
 
+-- // Internal: is any exclusive action currently running?
+
+function GraceRevolver:_isBusy(): boolean
+	return self.Firing or self.Reloading or self.Spinning
+end
+
 -- // Animation Layer System
 
--- Plays `name`.
--- Layer 0 replaces only layer 0.
--- Layer 1 replaces only layer 1, preserving the base track underneath.
--- Layer 2 stops everything and takes over.
 function GraceRevolver:_playAnim(name: string): AnimationTrack
 	local anims = self.RegisteredAnimations
 	local track = anims[name]
@@ -193,13 +194,11 @@ function GraceRevolver:_playAnim(name: string): AnimationTrack
 
 	for trackName, layer in pairs(ANIM_LAYER) do
 		local shouldStop = false
-
 		if myLayer == 2 then
 			shouldStop = layer <= 2
 		else
 			shouldStop = layer == myLayer
 		end
-
 		if shouldStop then
 			local t = anims[trackName]
 			if t and t ~= track and t.IsPlaying then
@@ -212,11 +211,9 @@ function GraceRevolver:_playAnim(name: string): AnimationTrack
 	return track
 end
 
--- Stops all tracks at or below `maxLayer`.
 function GraceRevolver:_stopLayer(maxLayer: number)
 	local anims = self.RegisteredAnimations
 	if not anims then return end
-
 	for trackName, layer in pairs(ANIM_LAYER) do
 		if layer <= maxLayer then
 			local t = anims[trackName]
@@ -227,12 +224,12 @@ function GraceRevolver:_stopLayer(maxLayer: number)
 	end
 end
 
--- Restores the correct base-layer track for the current Aiming + shoulder state,
--- but only if no action or takeover track is currently running.
+-- Restores the correct base-layer track. Never runs during a busy action
+-- or while any layer >= 1 track is still playing.
 function GraceRevolver:_restoreBase()
 	local anims = self.RegisteredAnimations
 	if not anims then return end
-	if self.Reloading then return end
+	if self:_isBusy() then return end
 
 	for trackName, layer in pairs(ANIM_LAYER) do
 		if layer >= 1 and anims[trackName] and anims[trackName].IsPlaying then
@@ -240,19 +237,25 @@ function GraceRevolver:_restoreBase()
 		end
 	end
 
+	-- Stop whichever base tracks shouldn't be playing before starting the right one,
+	-- so they never blend together.
 	if self.Aiming then
 		if self.current_shoulder == "Right" then
-			self:_playAnim("Aim")
+			if anims.Aim_Left and anims.Aim_Left.IsPlaying then anims.Aim_Left:Stop() end
+			if anims.Held     and anims.Held.IsPlaying     then anims.Held:Stop()     end
+			if not anims.Aim.IsPlaying then self:_playAnim("Aim") end
 		else
-			self:_playAnim("Aim_Left")
+			if anims.Aim  and anims.Aim.IsPlaying  then anims.Aim:Stop()  end
+			if anims.Held and anims.Held.IsPlaying  then anims.Held:Stop() end
+			if not anims.Aim_Left.IsPlaying then self:_playAnim("Aim_Left") end
 		end
 	else
-		self:_playAnim("Held")
+		if anims.Aim     and anims.Aim.IsPlaying     then anims.Aim:Stop()     end
+		if anims.Aim_Left and anims.Aim_Left.IsPlaying then anims.Aim_Left:Stop() end
+		if not anims.Held.IsPlaying then self:_playAnim("Held") end
 	end
 end
 
--- Deferred variant: waits one frame before restoring so Roblox has fully
--- cleared IsPlaying on any track that just fired its Stopped event.
 function GraceRevolver:_restoreBaseDeferred()
 	task.defer(function()
 		self:_restoreBase()
@@ -280,7 +283,7 @@ function GraceRevolver:_connectInput()
 		if gameProcessed then return end
 
 		if input.UserInputType == Enum.UserInputType.MouseButton2 then
-			self:aim()
+			self:end_aiming()
 		end
 	end)
 end
@@ -292,30 +295,36 @@ end
 
 -- // Shoulder
 
--- Called by BaseTool when Current_Shoulder attribute changes.
--- Only swaps the base-layer aim tracks - never touches layer 1 or 2.
+-- Guards every busy state. Deferred to match BaseTool's one-frame C0 re-cache
+-- so the aim track swap never lands on a stale shoulder origin.
 function GraceRevolver:_onShoulderChanged()
-	if not self.Aiming or self.Reloading then return end
+	if self:_isBusy() then return end
+	if not self.Aiming then return end
 
-	local anims = self.RegisteredAnimations
-	if self.current_shoulder == "Right" then
-		if anims.Aim_Left.IsPlaying then anims.Aim_Left:Stop() end
-		if not anims.Aim.IsPlaying then anims.Aim:Play() end
-	else
-		if anims.Aim.IsPlaying then anims.Aim:Stop() end
-		if not anims.Aim_Left.IsPlaying then anims.Aim_Left:Play() end
-	end
+	task.defer(function()
+		if self:_isBusy() then return end
+		if not self.Aiming then return end
+		self:_restoreBase()
+	end)
 end
 
 -- // Tool Actions
 
--- Cleanly exits aim; used for reload/unequip, not normal RMB toggle.
+-- Cleanly exits aim. Explicitly stops Held so it doesn't bleed into the
+-- reversed Aim playback when called from ammo_check or reload.
 function GraceRevolver:end_aiming()
 	self.Aiming = false
 	self:_stopAimTracking()
 
-	local aimAnim = self.RegisteredAnimations.Aim
-	if aimAnim.IsPlaying then
+	local anims = self.RegisteredAnimations
+
+	-- Stop Held immediately — it should not be playing during aim exit.
+	if anims.Held and anims.Held.IsPlaying then
+		anims.Held:Stop()
+	end
+
+	local aimAnim = anims.Aim
+	if aimAnim and aimAnim.IsPlaying then
 		aimAnim.TimePosition = 1
 		aimAnim:AdjustSpeed(-1)
 		aimAnim.Stopped:Once(function()
@@ -323,26 +332,27 @@ function GraceRevolver:end_aiming()
 		end)
 	end
 
-	local aimLeftAnim = self.RegisteredAnimations.Aim_Left
-	if aimLeftAnim.IsPlaying then
+	local aimLeftAnim = anims.Aim_Left
+	if aimLeftAnim and aimLeftAnim.IsPlaying then
 		aimLeftAnim:Stop()
 	end
 
-	if not self.Reloading then
-		self:_playAnim("Held")
-	end
+	self:_stopAllExcept()
 
 	game.Players.LocalPlayer.Character:SetAttribute("Aiming", false)
 end
 
 function GraceRevolver:aim()
+	if self:_isBusy() then return end
 	if self:_if_sprinting() then return end
-	if self.Reloading then return end
 
 	if not self.Aiming then
 		self.Aiming = true
 		self:_startAimTracking()
-		self:_stopLayer(0)
+
+		-- Stop Held before playing aim so they don't blend.
+		local anims = self.RegisteredAnimations
+		self:_stopAllExcept()
 
 		if self.current_shoulder == "Right" then
 			self:_playAnim("Aim")
@@ -351,20 +361,14 @@ function GraceRevolver:aim()
 		end
 
 		game.Players.LocalPlayer.Character:SetAttribute("Aiming", true)
-	else
-		self:end_aiming()
 	end
 end
 
--- Cylinder spin: plays Spin_Start then loops Spin on layer 1.
--- Firing at any point cancels the spin immediately since fire() calls
--- _playAnim("Fire") which stops all layer-1 tracks including Spin.
 function GraceRevolver:spin()
-	if self.Spinning or self.Reloading or self.Firing then return end
+	if self:_isBusy() then return end
 	self.Spinning       = true
 	self._spinCancelled = false
 
-	-- Intro: bring the gun up / open the cylinder gate
 	self:_playAnim("Spin_Start").Stopped:Wait()
 
 	if self._spinCancelled then
@@ -374,40 +378,30 @@ function GraceRevolver:spin()
 		return
 	end
 
-	-- Loop the spin until cancelled externally (fire, reload, unequip)
-	local spinTrack = self.RegisteredAnimations.Spin
 	self:_playAnim("Spin")
-
-	spinTrack.Stopped:Wait()
+	self.RegisteredAnimations.Spin.Stopped:Wait()
 
 	self.Spinning       = false
 	self._spinCancelled = false
-
-	-- Deferred so Roblox clears IsPlaying on the Spin track before we check
 	self:_restoreBaseDeferred()
 end
 
--- Stops an active spin cleanly.
 function GraceRevolver:_cancelSpin()
 	self._spinCancelled = true
 	local anims = self.RegisteredAnimations
 	if not anims then return end
-	local spinTrack = anims.Spin
-	if spinTrack and spinTrack.IsPlaying then spinTrack:Stop() end
-	local spinStartTrack = anims.Spin_Start
-	if spinStartTrack and spinStartTrack.IsPlaying then spinStartTrack:Stop() end
+	if anims.Spin       and anims.Spin.IsPlaying       then anims.Spin:Stop()       end
+	if anims.Spin_Start and anims.Spin_Start.IsPlaying then anims.Spin_Start:Stop() end
 end
 
 function GraceRevolver:fire()
 	if self.Firing then return end
 	self.Firing = true
 
-	-- If the cylinder is spinning, interrupt it before firing
 	if self.Spinning then
 		self:_cancelSpin()
 	end
 
-	-- Out of ammo — dry fire animation
 	if self.Capacity <= 0 then
 		if self.current_shoulder == "Right" then
 			self:_playAnim("Fire_Empty").Stopped:Wait()
@@ -441,11 +435,13 @@ function GraceRevolver:fire()
 	end
 
 	self.Capacity -= 1
-
 	Util.applyRecoil(self.recoil, self.recoil_count, 10, false)
 
+	-- Only restore if nothing else has taken over by the time fire ends.
 	fireTrack.Stopped:Once(function()
-		self:_restoreBaseDeferred()
+		if not self.Reloading and not self.Spinning then
+			self:_restoreBaseDeferred()
+		end
 	end)
 
 	self:emit_effect(
@@ -469,30 +465,26 @@ function GraceRevolver:Reload()
 	end
 
 	if self.Aiming then
-		self.Aiming = false
-		self:_stopAimTracking()
-		game.Players.LocalPlayer.Character:SetAttribute("Aiming", false)
+		self:end_aiming()
 	end
 
 	self:_stopLayer(2)
 	self.Reloading        = true
 	self._reloadCancelled = false
 
-	-- Open the cylinder / swing-out animation
 	self:_playAnim("Reload_Start").Stopped:Wait()
 
-	-- Load one cartridge at a time until full or cancelled
 	while self.Capacity < self.Max_Capacity and not self._reloadCancelled do
 		self:_playAnim("Reload_Loop").Stopped:Wait()
 		if self._reloadCancelled then break end
 		self.Capacity += 1
 	end
 
-	-- Close the cylinder
 	if not self._reloadCancelled then
 		self:_playAnim("Reload_End").Stopped:Wait()
 	else
-		self:_stopLayer(2)
+		if self.RegisteredAnimations.Reload_Loop.IsPlaying  then self.RegisteredAnimations.Reload_Loop:Stop()  end
+		if self.RegisteredAnimations.Reload_Start.IsPlaying then self.RegisteredAnimations.Reload_Start:Stop() end
 	end
 
 	self.Reloading        = false
@@ -518,6 +510,8 @@ function GraceRevolver:_on_equip()
 	self:_connectInput()
 	self:_initShoulderTracking()
 	game.Players.LocalPlayer.Character:SetAttribute("Sprint_Animation", "GraceRevolver")
+	
+	self:_playAnim("Held")
 end
 
 function GraceRevolver:_on_unequip()

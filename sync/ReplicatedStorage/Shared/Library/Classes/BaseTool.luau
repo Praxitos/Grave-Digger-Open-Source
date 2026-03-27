@@ -160,6 +160,28 @@ function BaseTool:equip()
 		end
 	end
 
+
+	LOCAL_PLAYER.Character:GetAttributeChangedSignal("Sprinting"):Connect(function()
+		if LOCAL_PLAYER.Character:GetAttribute("Sprinting") == true then
+			task.wait(1)
+			self:_stopAllExcept()
+			print("Stopping all anims for the sprint...")
+		else
+			print("Sprinting is false, not stopping anims")
+			if self.Aiming then
+				if self.current_shoulder == "Right" then
+					self.RegisteredAnimations.Aim:Play()
+					return
+				else
+					self.RegisteredAnimations.Aim_Left:Play()
+					return
+				end
+			end
+
+			self.RegisteredAnimations.Held:Play()
+		end
+	end)
+	
 	if self._on_equip then
 		self:_on_equip()
 	end
@@ -223,6 +245,7 @@ function BaseTool:ammo_check()
 		print("Has no check animation, assuming there is no built in check system...")
 		return
 	end
+	
 	if self.Firing or self.Reloading or self.Cycling or self.Alting then return end
 
 	local ammo_check_part
@@ -237,7 +260,10 @@ function BaseTool:ammo_check()
 		ammo_check_utils = require(workspace.CurrentCamera.Ammo_Check.Utils)
 	end
 
+	self:_stopAllExcept()
+	
 	self.RegisteredAnimations.Check:Play()
+	self.RegisteredAnimations.Check.Stopped:Wait()
 
 	local hrp = LOCAL_PLAYER.Character.HumanoidRootPart
 	ammo_check_part.Position = hrp.Position + hrp.CFrame.RightVector * 2 + Vector3.new(0, 1.5, 0)
@@ -249,6 +275,18 @@ function BaseTool:ammo_check()
 
 	local percentage = math.clamp(self.Capacity / self.Max_Capacity, 0, 1)
 	ammo_check_utils.utils(self.Ammo_Type, percentage, false)
+	
+	if self.Aiming then
+		if self.current_shoulder == "Right" then
+			self.RegisteredAnimations.Aim:Play()
+			return
+		else
+			self.RegisteredAnimations.Aim_Left:Play()
+			return
+		end
+	end
+
+	self.RegisteredAnimations.Held:Play()
 end
 
 -- // Shoulder Tracking (shared by all armed tools)

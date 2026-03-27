@@ -59,7 +59,7 @@ function HeavyPickaxe.new(PickaxeCreateInfo: Types.BaseToolCreateInfo): HeavyPic
 		Sharpen = Animations_Folder.Tools.Pickaxes.Heavy.HeavyPickaxe_Sharpen,
 	}
 
-	self.mining_power = 6
+	self.mining_power = 12
 	self._activationConnection = nil
 
 	return self
