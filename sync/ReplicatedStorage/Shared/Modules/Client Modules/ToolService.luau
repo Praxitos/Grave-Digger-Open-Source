@@ -5,7 +5,7 @@ local Backpack = LocalPlayer:WaitForChild("Backpack")
 local GameData = LocalPlayer:WaitForChild("GameData")
 local Accessory_Folder = GameData:WaitForChild("Accessorys")
 local Holster_Folder = Accessory_Folder:WaitForChild("Holsters")
-local ToolHolster_Folder = game:GetService("ReplicatedStorage").Shared.Assets.Holsters:FindFirstChild("Tool Holsters")
+local ToolHolster_Folder = game:GetService("ReplicatedStorage").Shared.Assets.Guns.Holsters:FindFirstChild("Tool Holsters")
 
 local GunClasses = game:GetService("ReplicatedStorage").Shared.Library.Classes.GunClasses
 local ToolClasses = game:GetService("ReplicatedStorage").Shared.Library.Classes.ToolClasses

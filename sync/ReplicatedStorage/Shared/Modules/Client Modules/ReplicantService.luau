@@ -1,8 +1,8 @@
 local module = {}
 
 local player_service = game:GetService("Players")
-local tool_holsters_reference_folder = game.ReplicatedStorage.Shared.Assets.Holsters["Tool Holsters"]
-local gun_holsters_reference_folder = game.ReplicatedStorage.Shared.Assets.Holsters["Gun Holsters"]
+local tool_holsters_reference_folder = game.ReplicatedStorage.Shared.Assets.Guns.Holsters["Tool Holsters"]
+local gun_holsters_reference_folder = game.ReplicatedStorage.Shared.Assets.Guns.Holsters["Gun Holsters"]
 local utilities_module = require(game.ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Library"):WaitForChild("Util"))
 
 local function setup_light(parent)

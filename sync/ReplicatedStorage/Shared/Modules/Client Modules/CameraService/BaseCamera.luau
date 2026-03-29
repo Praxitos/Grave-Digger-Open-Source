@@ -218,6 +218,7 @@ function BaseCamera.new(cameraInfo)
 	local self = CameraClass.new(cameraInfo)
 	setmetatable(self, {__index = BaseCamera})
 	self.CameraPosition = Camera.CFrame.Position
+	self.priority = 0
 	return self
 end
 
@@ -629,11 +630,37 @@ function BaseCamera:Update(dt: number)
 		* CFrame.Angles(activePitch, 0, 0)
 end
 
+function BaseCamera:End()
+	print("[CAMERASERVICE::] Ending camera:", self.name)
+	-- Disconnect all event connections
+	for _, connection in pairs(self.Connections or {}) do
+		connection:Disconnect()
+	end
+
+	-- Restore the current camera to Custom so the player can control it again
+	local camera = Workspace.CurrentCamera
+	if camera then
+		camera.CameraType = Enum.CameraType.Scriptable
+	end
+
+	-- Re-enable player mouse control
+	local player = game.Players.LocalPlayer
+	if player then
+		game:GetService("UserInputService").MouseBehavior = Enum.MouseBehavior.Default
+		game:GetService("UserInputService").MouseIconEnabled = true
+	end
+end
+
+function BaseCamera:Cut()
+	print("[CAMERASERVICE::] Cutting camera:", self.name)
+	self:End()
+end
 ------------------------------------------------------------------------
 -- Init
 ------------------------------------------------------------------------
 
 local myCamera = BaseCamera.new({ name = "BasicCamera", priority = 1, Connections = {} })
-myCamera:Start()
 
-return myCamera
+BaseCamera.priority = 1
+
+return BaseCamera

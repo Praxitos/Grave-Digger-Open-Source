@@ -17,7 +17,7 @@ local Assets         = ReplicatedStorage.Shared.Assets
 local Holster_Folder = Assets.Holsters:FindFirstChild("Gun Holsters")
 local Tool_Folder    = Assets.ToolModels
 local Anim_Folder    = Assets.Animations.Tools.Guns.GraceRevolver
-local Effects_Folder = Assets.Effects.Shooting
+local Effects_Folder = Assets.Guns.Effects.Shooting
 
 local muzzle_flash = Effects_Folder.Muzzle_Flash
 

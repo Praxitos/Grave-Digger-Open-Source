@@ -5,14 +5,14 @@ local workspace_service = game:GetService("Workspace")
 local replicatedstorage_service = game:GetService("ReplicatedStorage")
 
 -- // constants
-local game_setup = workspace_service.game_setup
+local game_setup = workspace_service.Game_Details.Main_Game
 local field_setup = game_setup.field_setup
 local mineable_region = field_setup.mineable_region
 
 local terrain_service = workspace_service.Terrain
 
-local nation_spawn = workspace_service.nation_spawnroom
-local empire_spawn = workspace_service.empire_spawnroom
+local nation_spawn = replicatedstorage_service.Shared.Assets.Maps.Spawn_Rooms.Regular.Nation
+local empire_spawn = replicatedstorage_service.Shared.Assets.Maps.Spawn_Rooms.Regular.Empire
 
 local delete_terrain_event = replicatedstorage_service.Shared.Library.Events.Terrain_Communication.Delete_Terrain
 -- // variables
@@ -44,18 +44,27 @@ end
 -----------------------
 -- SPAWN ROOMS
 -----------------------
+local function set_spawn_rooms()
+	print("[TERRAINSERVICE:: Setting up spawn rooms.")
+	
+	nation_spawn.Parent = workspace_service.Game_Details.Main_Game
+	empire_spawn.Parent = workspace_service.Game_Details.Main_Game
+end
+
+
+
 local function carve_spawn_rooms()
 	print("[TERRAINSERVICE:: Carving spawn rooms.")
 	
 	terrain_service:FillBlock(nation_spawn.basecenter.CFrame, nation_spawn.basecenter.Size, Enum.Material.Air)
-	terrain_service:FillBlock(empire_spawn.basecenter.CFrame, empire_spawn.basecenter.Size, Enum.Material.Air)
+	terrain_service:FillBlock(empire_spawn.Terrain.Air.CFrame, empire_spawn.Terrain.Air.Size, Enum.Material.Air)
 end
 
 
 local function basalt_spawns()
 	print("[TERRAINSERVICE:: Surrounding spawn rooms with basalt.")
 	terrain_service:FillBlock(nation_spawn.basecenter.CFrame, nation_spawn.basecenter.Size + Vector3.new(50, 50, 50), Enum.Material.Basalt)
-	terrain_service:FillBlock(empire_spawn.basecenter.CFrame, nation_spawn.basecenter.Size + Vector3.new(50, 50, 50), Enum.Material.Basalt)
+	terrain_service:FillBlock(empire_spawn.Terrain.Air.CFrame, empire_spawn.Terrain.Air.Size + Vector3.new(50, 50, 50), Enum.Material.Basalt)
 end
 
 local function carve_entrances()
@@ -105,6 +114,7 @@ end
 function module.start_module()
 	print("[TERRAINSERVICE:: Starting terrain service!")
 	
+	set_spawn_rooms()
 	fill_mineable_region()
 	fill_unminable_regions()
 	basalt_spawns()

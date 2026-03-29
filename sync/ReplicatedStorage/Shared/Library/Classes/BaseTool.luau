@@ -252,7 +252,7 @@ function BaseTool:ammo_check()
 	local ammo_check_utils
 
 	if not workspace.CurrentCamera:FindFirstChild("Ammo_Check") then
-		ammo_check_part = game.ReplicatedStorage.Shared.Assets.Effects.AmmoUI.Ammo_Check:Clone()
+		ammo_check_part = game.ReplicatedStorage.Shared.Assets.Guns.Effects.AmmoUI.Ammo_Check:Clone()
 		ammo_check_part.Parent = workspace.CurrentCamera
 		ammo_check_utils = require(ammo_check_part.Utils)
 	else

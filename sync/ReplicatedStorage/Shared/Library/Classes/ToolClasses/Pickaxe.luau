@@ -8,10 +8,10 @@ local Players = game:GetService("Players")
 local Types = require(script.Parent.Parent.Parent.Types)
 local BaseTool = require(script.Parent.Parent.BaseTool)
 
-local Holster_Folder = ReplicatedStorage.Shared.Assets.Holsters:FindFirstChild("Tool Holsters")
-local Tool_Folder = ReplicatedStorage.Shared.Assets.ToolModels
+local Holster_Folder = ReplicatedStorage.Shared.Assets.Guns.Holsters:FindFirstChild("Tool Holsters")
+local Tool_Folder = ReplicatedStorage.Shared.Assets.Guns.ToolModels
 local Animations_Folder = ReplicatedStorage.Shared.Assets.Animations
-local Effects_Folder = ReplicatedStorage.Shared.Assets.Effects
+local Effects_Folder = ReplicatedStorage.Shared.Assets.Guns.Effects
 local small_rocks = Effects_Folder.Mining.smallrock
 
 local utilities_module = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Library"):WaitForChild("Util"))
