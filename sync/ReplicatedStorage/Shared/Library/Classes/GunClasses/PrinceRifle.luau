@@ -92,7 +92,7 @@ function PrinceRifle.new(info: Types.BaseToolCreateInfo): PrinceRifle
 			* CFrame.Angles(math.rad(0.979), math.rad(-90), math.rad(90)),
 	}
 
-	self.Round = game.ReplicatedStorage.Shared.Assets.Rounds.PrinceRifle_Round
+	self.Round = game.ReplicatedStorage.Shared.Assets.Guns.Rounds.PrinceRifle_Round
 
 	self.animations = {
 		Draw    = Anim_Folder.PrinceRifle_Draw,

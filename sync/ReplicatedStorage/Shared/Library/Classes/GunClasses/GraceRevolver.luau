@@ -111,7 +111,7 @@ function GraceRevolver.new(info: Types.BaseToolCreateInfo): GraceRevolver
 	self.holster_reference = Holster_Folder and Holster_Folder:FindFirstChild("GraceRevolverHolster")
 	self.model_reference   = Tool_Folder:FindFirstChild("GraceRevolver")
 
-	self.Round = game.ReplicatedStorage.Shared.Assets.Rounds.GraceRevolver_Round
+	self.Round = game.ReplicatedStorage.Shared.Assets.Guns.Rounds.GraceRevolver_Round
 
 	self.motor_6d_data = {
 		Parent = "Right Arm",

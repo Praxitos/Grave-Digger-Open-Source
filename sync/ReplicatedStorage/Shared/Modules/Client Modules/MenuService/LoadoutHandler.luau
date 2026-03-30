@@ -95,7 +95,7 @@ local function setup_character()
 	
 	local_player.Character.Archivable = true
 	local character_clone = local_player.Character:Clone()
-	character_clone.HumanoidRootPart.Anchored = true
+	character_clone:WaitForChild("HumanoidRootPart").Anchored = true
 	character_clone.Parent = character_spot.Parent
 	character_clone.HumanoidRootPart.CFrame = character_spot.CFrame
 end
