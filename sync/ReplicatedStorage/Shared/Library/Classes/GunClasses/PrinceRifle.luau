@@ -14,8 +14,8 @@ local Util     = require(script.Parent.Parent.Parent.Util)
 -- // Asset References
 
 local Assets         = ReplicatedStorage.Shared.Assets
-local Holster_Folder = Assets.Holsters:FindFirstChild("Gun Holsters")
-local Tool_Folder    = Assets.ToolModels
+local Holster_Folder = Assets.Guns.Holsters:FindFirstChild("Gun Holsters")
+local Tool_Folder    = Assets.Guns.ToolModels
 local Anim_Folder    = Assets.Animations.Tools.Guns.PrinceRifle
 local Effects_Folder = Assets.Guns.Effects.Shooting
 
@@ -540,5 +540,10 @@ function PrinceRifle:Destroy()
 	self:_disconnectInput()
 	BaseTool.destroy(self)
 end
+
+PrinceRifle.Tool_Image = "rbxassetid://17496049645"
+PrinceRifle.Medal_Cost = 0
+PrinceRifle.Weight = 2
+
 
 return PrinceRifle

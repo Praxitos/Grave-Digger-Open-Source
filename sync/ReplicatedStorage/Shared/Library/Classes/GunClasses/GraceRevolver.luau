@@ -14,8 +14,8 @@ local Util     = require(script.Parent.Parent.Parent.Util)
 -- // Asset References
 
 local Assets         = ReplicatedStorage.Shared.Assets
-local Holster_Folder = Assets.Holsters:FindFirstChild("Gun Holsters")
-local Tool_Folder    = Assets.ToolModels
+local Holster_Folder = Assets.Guns.Holsters:FindFirstChild("Gun Holsters")
+local Tool_Folder    = Assets.Guns.ToolModels
 local Anim_Folder    = Assets.Animations.Tools.Guns.GraceRevolver
 local Effects_Folder = Assets.Guns.Effects.Shooting
 
@@ -541,5 +541,11 @@ function GraceRevolver:Destroy()
 	self:_disconnectInput()
 	BaseTool.destroy(self)
 end
+
+
+-- // Additional Variables to be used by instances unrequiring a class
+GraceRevolver.Tool_Image = "rbxassetid://17601078078"
+GraceRevolver.Medal_Cost = 1
+GraceRevolver.Weight = 1
 
 return GraceRevolver
