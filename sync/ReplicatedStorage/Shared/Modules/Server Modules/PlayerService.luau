@@ -4,7 +4,7 @@ local module = {}
 local Players = game:GetService("Players")
 
 local Animations_Folder = game:GetService("ReplicatedStorage").Shared.Assets.Animations.Character.Walking.Standing.Walk_Forward
-
+local Ragdoll_Status = require(game:GetService("ReplicatedStorage").Shared.Library.Classes.StatusClasses.RagdollStatus)
 
 local function setup_gamedata(player: Player)
 	local player_data_folder = Instance.new("Folder")
@@ -63,11 +63,34 @@ end
 local function setup_player(player: Player)
 	setup_gamedata(player)
 
+	local ragdoll_object = Ragdoll_Status.new()
 	player.CharacterAdded:Connect(function(character)
 		setup_characterdata(character)
+		character.Humanoid.BreakJointsOnDeath = false
+		character:WaitForChild("Humanoid").Died:Connect(function()
+			print("PlayerService: Player died", player.Name)
+			character.Archivable = true
+			local character_clone = character:Clone()
+			
+			if workspace.Game_Details:FindFirstChild("Bodies") then
+				character_clone.Parent = workspace.Game_Details.Bodies
+			else
+				local bodies_folder = Instance.new("Folder")
+				bodies_folder.Name = "Bodies"
+				bodies_folder.Parent = workspace.Game_Details
+				character_clone.Parent = bodies_folder
+			end
+			
+			-- // delete original character
+			character:Destroy()
+			
+			ragdoll_object:_special_apply(character_clone)
+			print("PlayerService: Player died", player.Name)
+		end)
 	end)
 
 	fetch_hair_accessories(player)
+	player:LoadCharacterAsync()
 	print("PlayerService: Set up player", player.Name)
 end
 

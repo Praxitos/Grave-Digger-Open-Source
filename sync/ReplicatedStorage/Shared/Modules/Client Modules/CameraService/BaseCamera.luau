@@ -438,6 +438,9 @@ function BaseCamera:Start()
 			self.RecoilYaw           = 0
 			self.IsAiming            = false
 			self.IsHoldBreath        = false
+			self.DeathSubject = nil
+			self.DeathOrbitYaw = 0
+			self.DeathOrbitPitch = 0
 			cancelHoldBreathTweens()
 			if activeFOVTween then activeFOVTween:Cancel() end
 			exitFreeLook(self, newCharacter)
@@ -450,6 +453,31 @@ function BaseCamera:Start()
 			self.SmoothedPos   = r.Position + Vector3.new(0, getOffset("heightOffset", DEFAULT_HEIGHT), 0)
 
 			connectCharacterAttributes(newCharacter)
+		end),
+		
+		LocalPlayer.Character.Humanoid.Died:Connect(function()
+			local bodies = Workspace:FindFirstChild("Game_Details") and Workspace.Game_Details:FindFirstChild("Bodies")
+			if not bodies then return end
+
+			-- poll for the body instead of WaitForChild which can yield too long
+			local dead_body = bodies:FindFirstChild(LocalPlayer.Name)
+			if not dead_body then
+				local conn
+				conn = bodies.ChildAdded:Connect(function(child)
+					if child.Name == LocalPlayer.Name then
+						conn:Disconnect()
+						self.DeathSubject        = child
+						self.DeathOrbitYaw       = self.CameraYaw
+						self.DeathOrbitPitch     = math.rad(-20)
+						self.DeathOrbitDistance  = 8
+					end
+				end)
+			else
+				self.DeathSubject        = dead_body
+				self.DeathOrbitYaw       = self.CameraYaw
+				self.DeathOrbitPitch     = math.rad(-20)
+				self.DeathOrbitDistance  = 8
+			end
 		end),
 	}
 end
@@ -469,13 +497,37 @@ end
 
 function BaseCamera:Update(dt: number)
 
+	local sensitivity = getOffset("rotationSpeed", 0.25)
+	local delta       = InputService:GetMouseDelta()
+
+	-- Death spectate (runs even when character root/humanoid are gone)
+	if self.DeathSubject then
+		local subjectPos
+		if self.DeathSubject:IsA("Model") then
+			subjectPos = self.DeathSubject.PrimaryPart and self.DeathSubject.PrimaryPart.Position or getHeadPos(self.DeathSubject)
+		else
+			subjectPos = self.DeathSubject.Position
+		end
+
+		self.DeathOrbitYaw   += math.rad(-delta.X * sensitivity)
+		self.DeathOrbitPitch += math.rad(-delta.Y * sensitivity)
+		self.DeathOrbitPitch  = math.clamp(self.DeathOrbitPitch, PITCH_MIN, PITCH_MAX)
+
+		local rot        = CFrame.Angles(0, self.DeathOrbitYaw, 0) * CFrame.Angles(self.DeathOrbitPitch, 0, 0)
+		local desiredPos = subjectPos - rot.LookVector * self.DeathOrbitDistance
+		self.SmoothedPos = lerpVec(self.SmoothedPos, desiredPos, CAM_SMOOTH_SPEED, dt)
+
+		Camera.CFrame = CFrame.new(self.SmoothedPos) * CFrame.Angles(0, self.DeathOrbitYaw, 0) * CFrame.Angles(self.DeathOrbitPitch, 0, 0)
+		return
+	end
+
 	local character = LocalPlayer.Character
 	if not character then return end
 
 	local root     = character:FindFirstChild("HumanoidRootPart")
 	local humanoid = character:FindFirstChildOfClass("Humanoid")
 	if not root or not humanoid then return end
-
+	
 	self.RaycastParams.FilterDescendantsInstances = {character}
 
 	local heightOffset = getOffset("heightOffset", DEFAULT_HEIGHT)
@@ -486,6 +538,30 @@ function BaseCamera:Update(dt: number)
 	-- 1. Mouse delta → angles
 	--------------------------------------------------------------------
 
+	local delta = InputService:GetMouseDelta()
+
+	-- Death spectate
+	if self.DeathSubject then
+		local subjectPos
+		if self.DeathSubject:IsA("Model") then
+			subjectPos = self.DeathSubject.PrimaryPart and self.DeathSubject.PrimaryPart.Position or getHeadPos(self.DeathSubject)
+		else
+			subjectPos = self.DeathSubject.Position
+		end
+
+		self.DeathOrbitYaw   += math.rad(-delta.X * sensitivity)
+		self.DeathOrbitPitch += math.rad(-delta.Y * sensitivity)
+		self.DeathOrbitPitch  = math.clamp(self.DeathOrbitPitch, PITCH_MIN, PITCH_MAX)
+
+		local rot        = CFrame.Angles(0, self.DeathOrbitYaw, 0) * CFrame.Angles(self.DeathOrbitPitch, 0, 0)
+		local desiredPos = subjectPos - rot.LookVector * self.DeathOrbitDistance
+		self.SmoothedPos = lerpVec(self.SmoothedPos, desiredPos, CAM_SMOOTH_SPEED, dt)
+
+		Camera.CFrame = CFrame.new(self.SmoothedPos) * CFrame.Angles(0, self.DeathOrbitYaw, 0) * CFrame.Angles(self.DeathOrbitPitch, 0, 0)
+		print("Death Subject")
+		return
+	end
+	
 	if self.IsFreeLook then
 		humanoid.AutoRotate = true
 		if self.FreeLookPhase == "orbiting" then

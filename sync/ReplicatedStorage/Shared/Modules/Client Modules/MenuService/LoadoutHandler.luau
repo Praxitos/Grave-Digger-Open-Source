@@ -91,8 +91,6 @@ local function create_weapon_options()
 end
 
 local function setup_character()
-	
-	
 	local_player.Character.Archivable = true
 	local character_clone = local_player.Character:Clone()
 	character_clone:WaitForChild("HumanoidRootPart").Anchored = true

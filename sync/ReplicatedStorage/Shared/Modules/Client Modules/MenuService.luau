@@ -55,6 +55,7 @@ local function start_sub_modules()
 		end
 	end
 end
+
 function module.start_module()
 	print("[MENUSERVICE::] Starting Menu Service!")
 	start_sub_modules()
