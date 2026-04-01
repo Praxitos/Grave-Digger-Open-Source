@@ -38,7 +38,13 @@ local nation_side_frame = main_score_frame:WaitForChild("nationside")
 local timer_frame = main_score_frame.center
 local objective_uis = main_score_frame.objective_uis
 
-local MAX_REIN = 500
+local a_point = workspace.Game_Details.Main_Game.Points.A
+local b_point = workspace.Game_Details.Main_Game.Points.B
+local c_point = workspace.Game_Details.Main_Game.Points.C
+
+local capture_holder = main_score_frame.objective_uis.control
+
+local MAX_REIN = 500 -- // only for scaling
 
 local function setup_light(parent: Instance)
 	local light = Instance.new("PointLight")
@@ -214,6 +220,27 @@ function module.start_module()
 		update_objective(game_mode.Value)
 	end)
 	
+	for _, child in pairs(a_point.Parent:GetChildren()) do
+		child.ChildAdded:Connect(function()
+			if objective_uis.control:FindFirstChild("objective" .. child.Name) then
+				objective_uis.control:FindFirstChild("objective" .. child.Name).Visible = true
+				print("Objective ui found for: " .. child.Name)
+			else
+				print("Objective ui not found for: " .. child.Name)
+			end
+		end)
+		
+		if #child:GetChildren() > 0 then
+			if objective_uis.control:FindFirstChild("objective" .. child.Name) then
+				objective_uis.control:FindFirstChild("objective" .. child.Name).Visible = true
+				print("Objective ui found for: " .. child.Name)
+			else
+				print("Objective ui not found for: " .. child.Name)
+			end
+		end
+	end
+	
+	
 	game.Players.LocalPlayer.CharacterAdded:Connect(function()
 		local player = player_service.LocalPlayer
 		local playerGui = player:WaitForChild("PlayerGui")
@@ -236,7 +263,6 @@ function module.start_module()
 
 		update_timer(timer_frame, game_timer.Value)
 		update_objective(game_mode.Value)
-		
 	end)
 end
 

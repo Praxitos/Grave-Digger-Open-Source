@@ -27,6 +27,20 @@ local nation_rein_wave_timer = nation_folder.Nation_Rein_Wave_Timer
 local timer_folder = scoring_variables.Timer
 local game_timer = timer_folder.Game_Timer
 
+local empire_spawn_room = workspace.Game_Details.Main_Game:WaitForChild("Empire")
+local nation_spawn_room = workspace.Game_Details.Main_Game:WaitForChild("Nation")
+
+local spawns_folder = shared_folder:WaitForChild("Assets"):WaitForChild('Animations'):WaitForChild("Character"):WaitForChild("Spawns")
+
+
+local gamemode_folder = scoring_variables.Gamemode
+local capture_points_count = gamemode_folder.Capture_Points_Count
+
+local core_maps_folder = shared_folder.Assets.Maps["Core Maps"]
+
+local main_game_folder = workspace.Game_Details.Main_Game
+local points_folder = main_game_folder.Points
+
 -- // Constants
 local time_tick = false
 
@@ -62,6 +76,9 @@ local function begin_time()
 	end
 end
 
+----------------------------
+-- SPAWNING HANDLING -------
+----------------------------
 local function has_available_players(team: Team): boolean
 	for _, player in ipairs(players_service:GetPlayers()) do
 		if player.Team == team and not player:GetAttribute("Active") then
@@ -72,15 +89,110 @@ local function has_available_players(team: Team): boolean
 	return false
 end
 
-local function spawn_reinforcements(team: Team, tag: string)
-	local count = 0
-	
-	for _, player in ipairs(players_service:GetPlayers()) do
-		if player:GetAttribute("Active") then continue end
+local function get_animation(spawn_name)
+	if not spawns_folder:FindFirstChild(spawn_name) then warn("No spawn folder for " .. spawn_name) return end
+	local animations = spawns_folder[spawn_name]:GetChildren()
+	if #animations == 0 then warn("No animations in " .. spawn_name) return end
+	return animations[math.random(1, #animations)]
+end
 
-		if player.Team and player.Team == team then
-			player:LoadCharacterAsync()
+local function find_empty_spot(spawnroom: Model)
+	for _, spawns in pairs(spawnroom.Spawns:GetChildren()) do
+		if not spawns:GetAttribute("Occupied") then
+			print("Found empty spot: " .. spawns.Name)
+			return spawns
+		else
+			print("Spot " .. spawns.Name .. " is occupied")
+		end
+	end
+	
+	-- // all slots filled, so just pick a random one
+	local spawns = spawnroom.Spawns:GetChildren()
+	return spawns[math.random(1, #spawns)]
+end
+
+local function spawn_reinforcements(team: Team, tag: string)
+	print("[GameManager::] Spawning reinforcements for " .. team.Name)
+
+	for _, player in ipairs(players_service:GetPlayers()) do
+		if player:GetAttribute("Active") then
+			continue
+		end
+
+		if player.Team == team then
 			player:SetAttribute("Active", true)
+
+			-- Load character safely
+			player:LoadCharacterAsync()
+			local character = player.Character or player.CharacterAdded:Wait()
+
+			-- Determine spawn container
+			local spawn_container
+			if team.Name == "Golden Empire" then
+				spawn_container = empire_spawn_room
+			else
+				spawn_container = nation_spawn_room
+			end
+
+			-- Get empty spawn slot
+			local spawn_slot = find_empty_spot(spawn_container)
+			if not spawn_slot then
+				warn("No available spawn slots")
+				continue
+			end
+
+			-- Mark occupied
+			spawn_slot:SetAttribute("Occupied", true)
+
+			-- Move character
+			character:PivotTo(spawn_slot.CFrame)
+
+			-- Play animation
+			local animation = get_animation(spawn_slot.Name)
+			local animTrack
+
+			if animation then
+				local humanoid = character:WaitForChild("Humanoid")
+				local animator = humanoid:FindFirstChildOfClass("Animator")
+
+				if animator then
+					animTrack = animator:LoadAnimation(animation)
+					animTrack:Play()
+				end
+			end
+
+			-- Movement detection with threshold
+			local Humanoid: Humanoid = character:WaitForChild("Humanoid")
+
+			local conn
+			conn = Humanoid:GetPropertyChangedSignal("MoveDirection"):Connect(function()
+				if Humanoid.MoveDirection.Magnitude > 0 then
+					spawn_slot:SetAttribute("Occupied", nil)
+
+					if animTrack then
+						animTrack.Looped = false
+						animTrack:Stop()
+					end
+
+					if conn then
+						conn:Disconnect()
+						conn = nil
+					end
+				end
+			end)
+
+			-- Cleanup if character dies early
+			character:WaitForChild("Humanoid").Died:Connect(function()
+				spawn_slot:SetAttribute("Occupied", nil)
+
+				if animTrack then
+					animTrack:Stop()
+				end
+
+				if conn then
+					conn:Disconnect()
+				end
+			end)
 		end
 	end
 end
@@ -112,6 +224,31 @@ local function handle_reinforcements(
 
 end
 
+
+----------------------------
+-- POINT ESTABILISHMENTS --
+----------------------------
+-- // returns random  point map
+local function select_random_map()
+	local spawns = core_maps_folder:GetChildren()
+	return spawns[math.random(1, #spawns)]
+end
+
+local function place_map(model, target_point)
+	model:PivotTo(target_point.CFrame)
+	model.Parent = target_point
+end
+
+local function fill_air_block(model)
+	local air_part = model:FindFirstChild("air")
+	
+	game.Workspace.Terrain:FillBlock(air_part.CFrame, air_part.Size, Enum.Material.Air)
+end
+
+
+
+
+
 function module.start_module()
 	print("[GameManager::] Running initial startup!")
 
@@ -139,6 +276,23 @@ function module.start_module()
 			"Nation"
 		)
 	end)
+	
+	
+	-- // for loop on the capture point count
+	for i = 1, capture_points_count.Value do
+		local map = select_random_map()
+		local point_table = points_folder:GetChildren()
+
+		local point
+
+		repeat
+			point = point_table[math.random(1, #point_table)]
+		until #point:GetChildren() == 0
+
+		place_map(map, point)
+		fill_air_block(map)
+		print("Placed map at point: " .. point.Name)
+	end
 end
 
 return module
