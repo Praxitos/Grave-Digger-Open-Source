@@ -86,11 +86,12 @@ local function setup_player(player: Player)
 			
 			ragdoll_object:_special_apply(character_clone)
 			print("PlayerService: Player died", player.Name)
+			
+			player:SetAttribute("Active", nil)
 		end)
 	end)
 
 	fetch_hair_accessories(player)
-	player:LoadCharacterAsync()
 	print("PlayerService: Set up player", player.Name)
 end
 

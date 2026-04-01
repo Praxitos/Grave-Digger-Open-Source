@@ -44,7 +44,7 @@ return function(context, instance, var1, var2)
 		return "Instance '"..instance.Name .."' not found."
 	end
 
-	if not instance:FindFirst(var1) and not instance:IsA("ValueBase") then
+	if not instance:FindFirstChild(var1) and not instance:IsA("ValueBase") then
 		-- If the property is not a child value, check if it exists as a property
 		if instance[var1] == nil then
 			return "Property '"..var1.."' not found on instance '"..instance.Name.."'."

@@ -455,7 +455,7 @@ function BaseCamera:Start()
 			connectCharacterAttributes(newCharacter)
 		end),
 		
-		LocalPlayer.Character.Humanoid.Died:Connect(function()
+		LocalPlayer.Character:WaitForChild("Humanoid").Died:Connect(function()
 			local bodies = Workspace:FindFirstChild("Game_Details") and Workspace.Game_Details:FindFirstChild("Bodies")
 			if not bodies then return end
 
