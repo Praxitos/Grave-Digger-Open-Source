@@ -41,6 +41,7 @@ local core_maps_folder = shared_folder.Assets.Maps["Core Maps"]
 local main_game_folder = workspace.Game_Details.Main_Game
 local points_folder = main_game_folder.Points
 
+
 -- // Constants
 local time_tick = false
 
@@ -245,9 +246,140 @@ local function fill_air_block(model)
 	game.Workspace.Terrain:FillBlock(air_part.CFrame, air_part.Size, Enum.Material.Air)
 end
 
+local function detect_point_handling(point: Instance, model: Model)
+	if not point or not model then return end
+
+	local capture_part: Part = model:FindFirstChild("capture")
+	local folder_point = gamemode_folder:FindFirstChild(point.Name .. "_Point")
+
+	local empirecount_numbervalue = folder_point:FindFirstChild(point.Name .. "_Empire_Count")
+	local nationcount_numbervalue = folder_point:FindFirstChild(point.Name .. "_Nation_Count")
+	local progress_numbervalue = folder_point:FindFirstChild(point.Name .. "_Progress")
+	local owner_stringvalue = folder_point:FindFirstChild(point.Name .. "_Owner")
+
+	if not (empirecount_numbervalue and nationcount_numbervalue and progress_numbervalue and owner_stringvalue) then
+		warn("[GameManager::] Missing value objects in:", folder_point.Name)
+		return
+	end
+
+	print("[Point Init]:", point.Name)
+
+	local player_count = 0
+	local players_in_point = {} -- [player] = true
+
+	local function add_player(player: Player)
+		if players_in_point[player] then return end -- already counted
+
+		players_in_point[player] = true
+		player_count += 1
+
+		local team = player.Team
+		if team == game.Teams["Golden Empire"] then
+			empirecount_numbervalue.Value += 1
+		elseif team == game.Teams["Royal Nation"] then
+			nationcount_numbervalue.Value += 1
+		end
+
+		print("[Point Init]:", point.Name, "entered by", player.Name)
+	end
+
+	local function remove_player(player: Player)
+		if not players_in_point[player] then return end -- not tracked
+
+		players_in_point[player] = nil
+		player_count -= 1
+
+		local team = player.Team
+		if team == game.Teams["Golden Empire"] then
+			empirecount_numbervalue.Value -= 1
+		elseif team == game.Teams["Royal Nation"] then
+			nationcount_numbervalue.Value -= 1
+		end
+
+		print("[Point Init]:", point.Name, "left by", player.Name)
+	end
+
+	capture_part.Touched:Connect(function(hit)
+		local character = hit.Parent
+		if not character then return end
+
+		local humanoid = character:FindFirstChild("Humanoid")
+		if not humanoid then return end
+
+		local player = game.Players:GetPlayerFromCharacter(character)
+		if not player then return end
+
+		add_player(player)
+	end)
+
+	capture_part.TouchEnded:Connect(function(hit)
+		local character = hit.Parent
+		if not character then return end
+
+		local humanoid = character:FindFirstChild("Humanoid")
+		if not humanoid then return end
+
+		local player = game.Players:GetPlayerFromCharacter(character)
+		if not player then return end
+
+		remove_player(player)
+	end)
+	
+	---------------- Loop
+	task.spawn(function()
+		while true do
+			task.wait(1) 
+
+			-- // take ownership
+			if progress_numbervalue.Value == 20 then
+				if empirecount_numbervalue.Value > nationcount_numbervalue.Value then
+					owner_stringvalue.Value = "Golden Empire"	
+					print("[GameManager::] set owner as Empire for:", point.Name)
+				elseif nationcount_numbervalue.Value > empirecount_numbervalue.Value then
+					owner_stringvalue.Value = "Royal Nation"
+					print("[GameManager::] set owner as Nation for:", point.Name)
+				else
+					owner_stringvalue.Value = ""
+				end
+				
+			
+				progress_numbervalue.Value = 0
+			end
 
 
 
+			if player_count <= 0 then	
+				if progress_numbervalue.Value > 0 then
+					progress_numbervalue.Value -= 1
+				end
+
+				continue
+			end
+
+			if empirecount_numbervalue.Value == nationcount_numbervalue.Value then
+				print("[GameManager::]", point.Name, "stalling... equal numbers.")
+				continue
+			end
+
+			if empirecount_numbervalue.Value > nationcount_numbervalue.Value then
+				if owner_stringvalue.Value == "Golden Empire" then
+					continue -- already owned by empire
+				end
+				progress_numbervalue.Value += 1
+				print("[GameManager::]", point.Name, "Being capped by empire.")
+			elseif nationcount_numbervalue.Value > empirecount_numbervalue.Value then
+				if owner_stringvalue.Value == "Royal Nation" then
+					continue -- already owned by nation
+				end
+				progress_numbervalue.Value += 1
+				print("[GameManager::]", point.Name, "Being capped by nation.")
+			end
+			
+			
+			
+		end
+	end)
+end
 
 function module.start_module()
 	print("[GameManager::] Running initial startup!")
@@ -291,6 +423,7 @@ function module.start_module()
 
 		place_map(map, point)
 		fill_air_block(map)
+		detect_point_handling(point, map)
 		print("Placed map at point: " .. point.Name)
 	end
 end

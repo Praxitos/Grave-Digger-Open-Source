@@ -4,6 +4,7 @@
 local module = {}
 
 local player_service = game:GetService("Players")
+local replicatedstorage_service = game:GetService("ReplicatedStorage")
 
 local tool_holsters_reference_folder = game.ReplicatedStorage.Shared.Assets.Guns.Holsters["Tool Holsters"]
 local gun_holsters_reference_folder  = game.ReplicatedStorage.Shared.Assets.Guns.Holsters["Gun Holsters"]
@@ -43,6 +44,13 @@ local b_point = workspace.Game_Details.Main_Game.Points.B
 local c_point = workspace.Game_Details.Main_Game.Points.C
 
 local capture_holder = main_score_frame.objective_uis.control
+
+
+local shared_folder = replicatedstorage_service.Shared
+local library_folder = shared_folder.Library
+local configuration_folder = library_folder.Configuration
+local scoring_variables = configuration_folder.Scoring_Variables
+local gamemode_folder = scoring_variables.Gamemode
 
 local MAX_REIN = 500 -- // only for scaling
 
@@ -179,6 +187,45 @@ local function update_objective(value: string)
 end
 --////////////////////////////////////////////////////////
 
+local function handle_children(child)
+	if objective_uis.control:FindFirstChild("objective" .. child.Name) then
+		objective_uis.control:FindFirstChild("objective" .. child.Name).Visible = true
+		print("Objective ui found for: " .. child.Name)
+
+		local control_ui = objective_uis.control:FindFirstChild("objective" .. child.Name)
+
+		local bar:Frame = control_ui:FindFirstChild("bar")
+
+		local folder_point = gamemode_folder:FindFirstChild(child.Name .. "_Point")
+
+		local empirecount_numbervalue = folder_point:FindFirstChild(child.Name .. "_Empire_Count")
+		local nationcount_numbervalue = folder_point:FindFirstChild(child.Name .. "_Nation_Count")
+		local progress_numbervalue = folder_point:FindFirstChild(child.Name .. "_Progress")
+		local owner_stringvalue = folder_point:FindFirstChild(child.Name .. "_Owner")
+
+		print("Found folder for: " .. child.Name)
+
+
+		local color_scheme = Color3.new(0,0,0)
+
+		progress_numbervalue.Changed:Connect(function()
+			print("Changed")
+
+			if empirecount_numbervalue.Value > nationcount_numbervalue.Value then
+				color_scheme = Color3.new(1, 1, 0)
+			elseif empirecount_numbervalue.Value < nationcount_numbervalue.Value then
+				color_scheme = Color3.new(167, 83, 170)
+			end
+
+			bar.BackgroundColor3 = color_scheme
+			bar.Size = UDim2.fromScale(1, progress_numbervalue.Value / 20)
+			print("Progress updated")
+		end)
+	else
+		print("Objective ui not found for: " .. child.Name)
+	end
+end
+
 function module.start_module()
 	-- Setup players
 	for _, player in pairs(player_service:GetPlayers()) do
@@ -220,23 +267,15 @@ function module.start_module()
 		update_objective(game_mode.Value)
 	end)
 	
+	
+
 	for _, child in pairs(a_point.Parent:GetChildren()) do
 		child.ChildAdded:Connect(function()
-			if objective_uis.control:FindFirstChild("objective" .. child.Name) then
-				objective_uis.control:FindFirstChild("objective" .. child.Name).Visible = true
-				print("Objective ui found for: " .. child.Name)
-			else
-				print("Objective ui not found for: " .. child.Name)
-			end
+			handle_children(child)
 		end)
 		
 		if #child:GetChildren() > 0 then
-			if objective_uis.control:FindFirstChild("objective" .. child.Name) then
-				objective_uis.control:FindFirstChild("objective" .. child.Name).Visible = true
-				print("Objective ui found for: " .. child.Name)
-			else
-				print("Objective ui not found for: " .. child.Name)
-			end
+			handle_children(child)
 		end
 	end
 	
