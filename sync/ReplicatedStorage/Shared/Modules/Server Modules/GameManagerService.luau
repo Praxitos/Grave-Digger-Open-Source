@@ -45,6 +45,12 @@ local points_folder = main_game_folder.Points
 -- // Constants
 local time_tick = false
 
+-- // Ticket drain state
+-- Tracks the current owner of each active capture point by name
+-- e.g. { A = "Golden Empire", B = "", C = "Royal Nation" }
+local point_owners: { [string]: string } = {}
+local total_points_on_map = 0
+
 -- // Funcs
 -- // formats time specially for the huge countdown
 local function format_time(total_seconds: number): string
@@ -332,14 +338,17 @@ local function detect_point_handling(point: Instance, model: Model)
 
 			-- // take ownership
 			if progress_numbervalue.Value == 20 then
-				if empirecount_numbervalue.Value > nationcount_numbervalue.Value then
-					owner_stringvalue.Value = "Golden Empire"	
+					if empirecount_numbervalue.Value > nationcount_numbervalue.Value then
+					owner_stringvalue.Value = "Golden Empire"
+					point_owners[point.Name] = "Golden Empire"
 					print("[GameManager::] set owner as Empire for:", point.Name)
 				elseif nationcount_numbervalue.Value > empirecount_numbervalue.Value then
 					owner_stringvalue.Value = "Royal Nation"
+					point_owners[point.Name] = "Royal Nation"
 					print("[GameManager::] set owner as Nation for:", point.Name)
 				else
 					owner_stringvalue.Value = ""
+					point_owners[point.Name] = ""
 				end
 				
 			
@@ -381,6 +390,62 @@ local function detect_point_handling(point: Instance, model: Model)
 	end)
 end
 
+----------------------------
+-- TICKET DRAIN LOOP ------
+----------------------------
+-- Every 3 seconds, each point owned by a team drains (3 * P / n) tickets
+-- from the ENEMY team, where P = points owned by enemy, n = total points.
+local function start_ticket_drain()
+	while time_tick do
+		task.wait(3)
+
+		if total_points_on_map == 0 then continue end
+
+		-- Count how many points each team owns
+		local empire_owned = 0
+		local nation_owned = 0
+
+		for _, owner in pairs(point_owners) do
+			if owner == "Golden Empire" then
+				empire_owned += 1
+			elseif owner == "Royal Nation" then
+				nation_owned += 1
+			end
+		end
+
+		-- Empire-owned points drain Nation tickets
+		-- Total drain = 3 * empire_owned / n  (each point drains 3/n)
+		if empire_owned > 0 then
+			local total_drain = (3 * empire_owned) / total_points_on_map
+			local floored = math.floor(total_drain)
+			if floored > 0 then
+				local new_value = math.max(0, nation_rein_count.Value - floored)
+				if new_value ~= nation_rein_count.Value then
+					print("[GameManager::] Draining", floored, "tickets from Nation ("
+						.. empire_owned .. "/" .. total_points_on_map .. " points held by Empire)")
+					nation_rein_count.Value = new_value
+				end
+			end
+		end
+
+		-- Nation-owned points drain Empire tickets
+		-- Total drain = 3 * nation_owned / n  (each point drains 3/n)
+		if nation_owned > 0 then
+			local total_drain = (3 * nation_owned) / total_points_on_map
+			local floored = math.floor(total_drain)
+			if floored > 0 then
+				local new_value = math.max(0, empire_rein_count.Value - floored)
+				if new_value ~= empire_rein_count.Value then
+					print("[GameManager::] Draining", floored, "tickets from Empire ("
+						.. nation_owned .. "/" .. total_points_on_map .. " points held by Nation)")
+					empire_rein_count.Value = new_value
+				end
+			end
+		end
+	end
+end
+
+
 function module.start_module()
 	print("[GameManager::] Running initial startup!")
 
@@ -411,6 +476,8 @@ function module.start_module()
 	
 	
 	-- // for loop on the capture point count
+	total_points_on_map = capture_points_count.Value
+
 	for i = 1, capture_points_count.Value do
 		local map = select_random_map()
 		local point_table = points_folder:GetChildren()
@@ -421,11 +488,17 @@ function module.start_module()
 			point = point_table[math.random(1, #point_table)]
 		until #point:GetChildren() == 0
 
+		-- Register this point in the owner tracker
+		point_owners[point.Name] = ""
+
 		place_map(map, point)
 		fill_air_block(map)
 		detect_point_handling(point, map)
 		print("Placed map at point: " .. point.Name)
 	end
+
+	-- Start the ticket drain loop
+	task.spawn(start_ticket_drain)
 end
 
 return module
