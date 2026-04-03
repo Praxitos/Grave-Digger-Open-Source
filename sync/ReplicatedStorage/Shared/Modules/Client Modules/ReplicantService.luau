@@ -63,6 +63,10 @@ local overhead_connections: { RBXScriptConnection } = {}
 local active_flash_tweens: { [Frame]: Tween } = {}
 local flash_connections: { [Frame]: RBXScriptConnection } = {}
 
+-- Tracks the last team that was actively pushing each point, keyed by point name.
+-- Preserved during decay so the bar keeps the correct color as it falls back.
+local point_cap_team: { [string]: string } = {}
+
 
 -- Helpers
 
@@ -135,63 +139,49 @@ end
 
 
 -- Flash helpers
+
 local function start_flash(frame: Frame)
 	if active_flash_tweens[frame] then return end
 
-	frame.Visible = true
-	frame.BackgroundColor3 = FLASH_COLOR
+	frame.BackgroundColor3                  = FLASH_COLOR
+	frame.BackgroundTransparency            = 1
+	overhead_enemyin.BackgroundTransparency = 1
+
+	frame.Visible            = true
+	overhead_enemyin.Visible = true
 
 	local tween = TweenService:Create(frame, FLASH_TWEEN_INFO, {
 		BackgroundTransparency = 0
 	})
-
 	active_flash_tweens[frame] = tween
 	tween:Play()
-
-	-- Sync overhead
-	overhead_enemyin.Visible = true
 
 	if flash_connections[frame] then
 		flash_connections[frame]:Disconnect()
 	end
-
 	flash_connections[frame] = frame:GetPropertyChangedSignal("BackgroundTransparency"):Connect(function()
 		overhead_enemyin.BackgroundTransparency = frame.BackgroundTransparency
 	end)
 end
 
 local function stop_flash(frame: Frame)
-	-- Stop tween
 	local tween = active_flash_tweens[frame]
 	if tween then
 		tween:Cancel()
 		active_flash_tweens[frame] = nil
 	end
 
-	-- Disconnect sync
 	if flash_connections[frame] then
 		flash_connections[frame]:Disconnect()
 		flash_connections[frame] = nil
 	end
 
-	frame.BackgroundTransparency = 1
-	frame.Visible = false
-
-	overhead_enemyin.Visible = false
+	frame.BackgroundTransparency            = 1
+	frame.Visible                           = false
+	overhead_enemyin.BackgroundTransparency = 1
+	overhead_enemyin.Visible                = false
 end
 
--- Returns true if enemy players are currently on the point
-local function enemy_is_contesting(empire_count: IntValue, nation_count: IntValue): boolean
-	local team = local_player.Team
-	if not team then return false end
-	if team.Name == "Golden Empire" then
-		return nation_count.Value > 0
-	else
-		return empire_count.Value > 0
-	end
-end
-
--- Updates both the scoreboard enemyin frame and overhead enemyin frame for a point
 local function update_enemy_flash(
 	empire_count: IntValue,
 	nation_count: IntValue,
@@ -205,7 +195,7 @@ local function update_enemy_flash(
 	end
 
 	local enemy_present = false
-	local enemy_owns = false
+	local enemy_owns    = false
 
 	if team.Name == "Golden Empire" then
 		enemy_present = nation_count.Value > 0
@@ -215,7 +205,6 @@ local function update_enemy_flash(
 		enemy_owns    = owner.Value == "Golden Empire"
 	end
 
-	-- Flash ONLY if enemy is present AND does NOT own the point
 	if enemy_present and not enemy_owns then
 		start_flash(scoreboard_enemyin)
 	else
@@ -300,7 +289,55 @@ local function clear_overhead_connections()
 	table.clear(overhead_connections)
 end
 
--- Applies owner state to a scoreboard control UI; mirrors to overhead when sync_overhead is true
+-- Returns the bar color for whichever team last pushed this point
+local function get_cap_color(team_name: string?): Color3
+	if team_name == "Golden Empire" then
+		return Color3.new(1, 1, 0)
+	elseif team_name == "Royal Nation" then
+		return Color3.fromRGB(167, 83, 170)
+	end
+	-- Neutral fallback — progress should be 0 at this point anyway
+	return Color3.fromRGB(167, 83, 170)
+end
+
+-- Applies progress to a bar.
+-- Updates the remembered capping team when someone is actively pushing,
+-- and leaves it unchanged during decay so the color persists.
+local function apply_progress(
+	point_name: string,
+	progress_value: number,
+	empire_count: IntValue,
+	nation_count: IntValue,
+	bar: Frame,
+	sync_overhead: boolean
+)
+	local empire_n = empire_count.Value
+	local nation_n = nation_count.Value
+
+	if empire_n > nation_n then
+		point_cap_team[point_name] = "Golden Empire"
+	elseif nation_n > empire_n then
+		point_cap_team[point_name] = "Royal Nation"
+	end
+	-- Nobody pushing (decay) → point_cap_team[point_name] unchanged
+
+	-- Forget the team once the bar fully resets
+	if progress_value == 0 then
+		point_cap_team[point_name] = nil
+	end
+
+	local color = get_cap_color(point_cap_team[point_name])
+	local size  = UDim2.fromScale(1, progress_value / 20)
+
+	bar.BackgroundColor3 = color
+	bar.Size             = size
+
+	if sync_overhead then
+		overhead_bar.BackgroundColor3 = color
+		overhead_bar.Size             = size
+	end
+end
+
 local function apply_owner(
 	owner_value: string,
 	bar: Frame, bg_icon: ImageLabel, point_label: TextLabel,
@@ -336,28 +373,6 @@ local function apply_owner(
 	end
 end
 
--- Applies progress state to a scoreboard bar; mirrors to overhead when sync_overhead is true
-local function apply_progress(
-	progress_value: number,
-	empire_gt_nation: boolean,
-	bar: Frame,
-	sync_overhead: boolean
-)
-	local color = empire_gt_nation
-		and Color3.new(1, 1, 0)
-		or  Color3.fromRGB(167, 83, 170)
-	local size = UDim2.fromScale(1, progress_value / 20)
-
-	bar.BackgroundColor3 = color
-	bar.Size             = size
-
-	if sync_overhead then
-		overhead_bar.BackgroundColor3 = color
-		overhead_bar.Size             = size
-	end
-end
-
--- Syncs the overhead UI to mirror a specific point, live until the player exits the zone
 local function sync_overhead_to_point(point_name: string)
 	clear_overhead_connections()
 
@@ -372,24 +387,23 @@ local function sync_overhead_to_point(point_name: string)
 	local progress     = folder:FindFirstChild(point_name .. "_Progress")
 	local owner        = folder:FindFirstChild(point_name .. "_Owner")
 
-	local control_ui      = objective_uis.control:FindFirstChild("objective" .. point_name)
-	local bar             = control_ui and control_ui:FindFirstChild("bar")     :: Frame
-	local bg_icon         = control_ui and control_ui:FindFirstChild("bgicon")  :: ImageLabel
-	local point_label     = control_ui and control_ui:FindFirstChild("label")   :: TextLabel
+	local control_ui         = objective_uis.control:FindFirstChild("objective" .. point_name)
+	local bar                = control_ui and control_ui:FindFirstChild("bar")     :: Frame
+	local bg_icon            = control_ui and control_ui:FindFirstChild("bgicon")  :: ImageLabel
+	local point_label        = control_ui and control_ui:FindFirstChild("label")   :: TextLabel
 	local scoreboard_enemyin = control_ui and control_ui:FindFirstChild("enemyin") :: Frame
 
-	-- Immediate sync on entry
 	overhead_label.Text = point_name
 	apply_owner(owner.Value, bar, bg_icon, point_label, true)
-	apply_progress(progress.Value, empire_count.Value > nation_count.Value, bar, true)
+	apply_progress(point_name, progress.Value, empire_count, nation_count, bar, true)
 	update_enemy_flash(empire_count, nation_count, owner, scoreboard_enemyin)
 
-	-- Live updates while on the point
 	table.insert(overhead_connections, progress.Changed:Connect(function()
-		apply_progress(progress.Value, empire_count.Value > nation_count.Value, bar, true)
+		apply_progress(point_name, progress.Value, empire_count, nation_count, bar, true)
 	end))
 	table.insert(overhead_connections, owner.Changed:Connect(function()
 		apply_owner(owner.Value, bar, bg_icon, point_label, true)
+		update_enemy_flash(empire_count, nation_count, owner, scoreboard_enemyin)
 	end))
 	table.insert(overhead_connections, empire_count.Changed:Connect(function()
 		update_enemy_flash(empire_count, nation_count, owner, scoreboard_enemyin)
@@ -417,24 +431,19 @@ local function bind_point_ui(point_name: string, control_ui: Frame)
 	local point_label: TextLabel = control_ui:FindFirstChild("label")
 
 	progress.Changed:Connect(function()
-		apply_progress(progress.Value, empire_count.Value > nation_count.Value, bar, false)
+		apply_progress(point_name, progress.Value, empire_count, nation_count, bar, false)
 	end)
 	owner.Changed:Connect(function()
 		apply_owner(owner.Value, bar, bg_icon, point_label, false)
+		update_enemy_flash(empire_count, nation_count, owner, scoreboard_enemyin)
 	end)
-	
-	
+
 	update_enemy_flash(empire_count, nation_count, owner, scoreboard_enemyin)
 
 	empire_count.Changed:Connect(function()
 		update_enemy_flash(empire_count, nation_count, owner, scoreboard_enemyin)
 	end)
-
 	nation_count.Changed:Connect(function()
-		update_enemy_flash(empire_count, nation_count, owner, scoreboard_enemyin)
-	end)
-
-	owner.Changed:Connect(function()
 		update_enemy_flash(empire_count, nation_count, owner, scoreboard_enemyin)
 	end)
 end
@@ -454,7 +463,6 @@ local function bind_capture_point_proximity(model: Model, point_name: string)
 		if hit.Parent ~= local_player.Character then return end
 		if not overhead_frame.Visible then return end
 		overhead_frame.Visible = false
-		-- Stop the overhead flash but leave the scoreboard flash running
 		stop_flash(overhead_enemyin)
 		clear_overhead_connections()
 	end)
