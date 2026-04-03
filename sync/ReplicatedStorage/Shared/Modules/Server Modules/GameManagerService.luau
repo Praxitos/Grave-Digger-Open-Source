@@ -1,430 +1,338 @@
 ------------
 -- @Praxitos
--- GameManager, handles rounds, spawning players, etc.
+-- GameManagerService — handles rounds, spawning, and control point logic
 ------------
 
 local module = {}
 
--- // Services
-local replicatedstorage_service = game:GetService("ReplicatedStorage")
-local players_service = game:GetService("Players")
+-- Services
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players           = game:GetService("Players")
 
--- // Vars
-local shared_folder = replicatedstorage_service.Shared
-local library_folder = shared_folder.Library
-local configuration_folder = library_folder.Configuration
-local scoring_variables = configuration_folder.Scoring_Variables
+-- Shared folders
+local shared        = ReplicatedStorage.Shared
+local library       = shared.Library
+local config        = library.Configuration.Scoring_Variables
 
-local empire_folder = scoring_variables.Empire
-local empire_rein_count = empire_folder.Empire_Rein_Count
-local empire_rein_wave_timer = empire_folder.Empire_Rein_Wave_Timer
+-- Scoring values
+local empire_rein_count      = config.Empire.Empire_Rein_Count
+local empire_rein_wave_timer = config.Empire.Empire_Rein_Wave_Timer
+local nation_rein_count      = config.Nation.Nation_Rein_Count
+local nation_rein_wave_timer = config.Nation.Nation_Rein_Wave_Timer
+local game_timer             = config.Timer.Game_Timer
+local gamemode_folder        = config.Gamemode
+local capture_points_count   = gamemode_folder.Capture_Points_Count
 
+-- Workspace references
+local main_game     = workspace.Game_Details.Main_Game
+local empire_spawn  = main_game:WaitForChild("Empire")
+local nation_spawn  = main_game:WaitForChild("Nation")
+local points_folder = main_game.Points
 
-local nation_folder = scoring_variables.Nation
-local nation_rein_count = nation_folder.Nation_Rein_Count
-local nation_rein_wave_timer = nation_folder.Nation_Rein_Wave_Timer
+-- Assets
+local spawn_anims = shared.Assets.Animations.Character.Spawns
+local core_maps   = shared.Assets.Maps["Core Maps"]
 
-local timer_folder = scoring_variables.Timer
-local game_timer = timer_folder.Game_Timer
-
-local empire_spawn_room = workspace.Game_Details.Main_Game:WaitForChild("Empire")
-local nation_spawn_room = workspace.Game_Details.Main_Game:WaitForChild("Nation")
-
-local spawns_folder = shared_folder:WaitForChild("Assets"):WaitForChild('Animations'):WaitForChild("Character"):WaitForChild("Spawns")
-
-
-local gamemode_folder = scoring_variables.Gamemode
-local capture_points_count = gamemode_folder.Capture_Points_Count
-
-local core_maps_folder = shared_folder.Assets.Maps["Core Maps"]
-
-local main_game_folder = workspace.Game_Details.Main_Game
-local points_folder = main_game_folder.Points
-
-
--- // Constants
+-- State
 local time_tick = false
+local active_points = {}
 
--- // Funcs
--- // formats time specially for the huge countdown
+-- Decimal buffers (for IntValue safety)
+local empire_buffer = 0
+local nation_buffer = 0
+
+--------------------------------------------------
+-- Time
+--------------------------------------------------
+
 local function format_time(total_seconds: number): string
-	local minutes = math.floor(total_seconds / 60)
-	local seconds = total_seconds % 60
-
-	return string.format("%02d:%02d", minutes, seconds)
+	return string.format("%02d:%02d", math.floor(total_seconds / 60), total_seconds % 60)
 end
 
--- // Overall game time
 local function begin_time()
-	-- expects game_timer.Value to start as "00:00" or nil
-
 	local total_seconds = 0
 
-	-- if there's already a value, parse it
-	if typeof(game_timer.Value) == "string" then
-		local min, sec = string.match(game_timer.Value, "^(%d%d):(%d%d)$")
-		if min and sec then
-			total_seconds = tonumber(min) * 60 + tonumber(sec)
-		end
-	end
-
-	while time_tick == true do
+	while time_tick do
 		task.wait(1)
-
 		total_seconds += 1
-
 		game_timer.Value = format_time(total_seconds)
 	end
 end
 
-----------------------------
--- SPAWNING HANDLING -------
-----------------------------
-local function has_available_players(team: Team): boolean
-	for _, player in ipairs(players_service:GetPlayers()) do
+--------------------------------------------------
+-- Spawning (unchanged core logic)
+--------------------------------------------------
+
+local function find_empty_spawn(spawn_room: Model): Instance
+	for _, slot in pairs(spawn_room.Spawns:GetChildren()) do
+		if not slot:GetAttribute("Occupied") then
+			return slot
+		end
+	end
+	local slots = spawn_room.Spawns:GetChildren()
+	return slots[math.random(1, #slots)]
+end
+
+local function has_eligible_players(team: Team): boolean
+	for _, player in ipairs(Players:GetPlayers()) do
 		if player.Team == team and not player:GetAttribute("Active") then
 			return true
 		end
 	end
-
 	return false
 end
 
-local function get_animation(spawn_name)
-	if not spawns_folder:FindFirstChild(spawn_name) then warn("No spawn folder for " .. spawn_name) return end
-	local animations = spawns_folder[spawn_name]:GetChildren()
-	if #animations == 0 then warn("No animations in " .. spawn_name) return end
-	return animations[math.random(1, #animations)]
-end
+local function spawn_wave(team: Team)
+	local spawn_room = team.Name == "Golden Empire" and empire_spawn or nation_spawn
 
-local function find_empty_spot(spawnroom: Model)
-	for _, spawns in pairs(spawnroom.Spawns:GetChildren()) do
-		if not spawns:GetAttribute("Occupied") then
-			print("Found empty spot: " .. spawns.Name)
-			return spawns
-		else
-			print("Spot " .. spawns.Name .. " is occupied")
-		end
-	end
-	
-	-- // all slots filled, so just pick a random one
-	local spawns = spawnroom.Spawns:GetChildren()
-	return spawns[math.random(1, #spawns)]
-end
+	for _, player in ipairs(Players:GetPlayers()) do
+		if player.Team ~= team or player:GetAttribute("Active") then continue end
 
-local function spawn_reinforcements(team: Team, tag: string)
-	print("[GameManager::] Spawning reinforcements for " .. team.Name)
+		player:SetAttribute("Active", true)
+		player:LoadCharacterAsync()
 
-	for _, player in ipairs(players_service:GetPlayers()) do
-		if player:GetAttribute("Active") then
-			continue
-		end
+		local character = player.Character or player.CharacterAdded:Wait()
+		local slot      = find_empty_spawn(spawn_room)
 
-		if player.Team == team then
-			player:SetAttribute("Active", true)
+		slot:SetAttribute("Occupied", true)
+		character:PivotTo(slot.CFrame)
 
-			-- Load character safely
-			player:LoadCharacterAsync()
-			local character = player.Character or player.CharacterAdded:Wait()
+		local humanoid = character:WaitForChild("Humanoid")
 
-			-- Determine spawn container
-			local spawn_container
-			if team.Name == "Golden Empire" then
-				spawn_container = empire_spawn_room
-			else
-				spawn_container = nation_spawn_room
+		local move_conn
+		move_conn = humanoid:GetPropertyChangedSignal("MoveDirection"):Connect(function()
+			if humanoid.MoveDirection.Magnitude > 0 then
+				slot:SetAttribute("Occupied", nil)
+				move_conn:Disconnect()
 			end
+		end)
 
-			-- Get empty spawn slot
-			local spawn_slot = find_empty_spot(spawn_container)
-			if not spawn_slot then
-				warn("No available spawn slots")
-				continue
-			end
-
-			-- Mark occupied
-			spawn_slot:SetAttribute("Occupied", true)
-
-			-- Move character
-			character:PivotTo(spawn_slot.CFrame)
-
-			-- Play animation
-			local animation = get_animation(spawn_slot.Name)
-			local animTrack
-
-			if animation then
-				local humanoid = character:WaitForChild("Humanoid")
-				local animator = humanoid:FindFirstChildOfClass("Animator")
-
-				if animator then
-					animTrack = animator:LoadAnimation(animation)
-					animTrack:Play()
-				end
-			end
-
-			-- Movement detection with threshold
-			local Humanoid: Humanoid = character:WaitForChild("Humanoid")
-
-			local conn
-			conn = Humanoid:GetPropertyChangedSignal("MoveDirection"):Connect(function()
-				if Humanoid.MoveDirection.Magnitude > 0 then
-					spawn_slot:SetAttribute("Occupied", nil)
-
-					if animTrack then
-						animTrack.Looped = false
-						animTrack:Stop()
-					end
-
-					if conn then
-						conn:Disconnect()
-						conn = nil
-					end
-				end
-			end)
-
-			-- Cleanup if character dies early
-			character:WaitForChild("Humanoid").Died:Connect(function()
-				spawn_slot:SetAttribute("Occupied", nil)
-
-				if animTrack then
-					animTrack:Stop()
-				end
-
-				if conn then
-					conn:Disconnect()
-				end
-			end)
-		end
+		humanoid.Died:Connect(function()
+			slot:SetAttribute("Occupied", nil)
+			move_conn:Disconnect()
+		end)
 	end
 end
 
-local function handle_reinforcements(
-	rein_count: IntValue,
-	wave_timer: IntValue,
-	team: Team,
-	tag: string
-)
+local function handle_reinforcement_wave(rein_count, wave_timer, team)
 	while rein_count.Value > 0 do
 		task.wait(1)
 
 		if wave_timer.Value > 0 then
 			wave_timer.Value -= 1
-		else
-			-- WAIT until at least one player is eligible
-			if not has_available_players(team) then
-				continue
-			end
+			continue
+		end
 
-			spawn_reinforcements(team, tag)
+		if not has_eligible_players(team) then continue end
 
-			rein_count.Value -= 1
+		spawn_wave(team)
+		rein_count.Value -= 1
+		wave_timer.Value = 30
+	end
+end
 
-			wave_timer.Value = 30
+--------------------------------------------------
+-- Capture System (FIXED)
+--------------------------------------------------
+
+local function get_players_in_zone(part: BasePart)
+	local list = {}
+
+	for _, player in ipairs(Players:GetPlayers()) do
+		local char = player.Character
+		if not char then continue end
+
+		local root = char:FindFirstChild("HumanoidRootPart")
+		if not root then continue end
+
+		local relative = part.CFrame:PointToObjectSpace(root.Position)
+		local half = part.Size / 2
+
+		if math.abs(relative.X) <= half.X
+			and math.abs(relative.Y) <= half.Y
+			and math.abs(relative.Z) <= half.Z then
+			table.insert(list, player)
 		end
 	end
 
+	return list
 end
 
+local function setup_capture_point(point: Instance, model: Model)
+	local capture_part = model:FindFirstChild("capture")
+	if not capture_part then return end
 
-----------------------------
--- POINT ESTABILISHMENTS --
-----------------------------
--- // returns random  point map
-local function select_random_map()
-	local spawns = core_maps_folder:GetChildren()
-	return spawns[math.random(1, #spawns)]
-end
+	local point_data = gamemode_folder:FindFirstChild(point.Name .. "_Point")
+	if not point_data then return end
 
-local function place_map(model, target_point)
-	model:PivotTo(target_point.CFrame)
-	model.Parent = target_point
-end
+	local empire_count = point_data:FindFirstChild(point.Name .. "_Empire_Count")
+	local nation_count = point_data:FindFirstChild(point.Name .. "_Nation_Count")
+	local progress     = point_data:FindFirstChild(point.Name .. "_Progress")
+	local owner        = point_data:FindFirstChild(point.Name .. "_Owner")
 
-local function fill_air_block(model)
-	local air_part = model:FindFirstChild("air")
-	
-	game.Workspace.Terrain:FillBlock(air_part.CFrame, air_part.Size, Enum.Material.Air)
-end
+	if not (empire_count and nation_count and progress and owner) then return end
 
-local function detect_point_handling(point: Instance, model: Model)
-	if not point or not model then return end
+	table.insert(active_points, {
+		point = point,
+		owner = owner
+	})
 
-	local capture_part: Part = model:FindFirstChild("capture")
-	local folder_point = gamemode_folder:FindFirstChild(point.Name .. "_Point")
-
-	local empirecount_numbervalue = folder_point:FindFirstChild(point.Name .. "_Empire_Count")
-	local nationcount_numbervalue = folder_point:FindFirstChild(point.Name .. "_Nation_Count")
-	local progress_numbervalue = folder_point:FindFirstChild(point.Name .. "_Progress")
-	local owner_stringvalue = folder_point:FindFirstChild(point.Name .. "_Owner")
-
-	if not (empirecount_numbervalue and nationcount_numbervalue and progress_numbervalue and owner_stringvalue) then
-		warn("[GameManager::] Missing value objects in:", folder_point.Name)
-		return
-	end
-
-	print("[Point Init]:", point.Name)
-
-	local player_count = 0
-	local players_in_point = {} -- [player] = true
-
-	local function add_player(player: Player)
-		if players_in_point[player] then return end -- already counted
-
-		players_in_point[player] = true
-		player_count += 1
-
-		local team = player.Team
-		if team == game.Teams["Golden Empire"] then
-			empirecount_numbervalue.Value += 1
-		elseif team == game.Teams["Royal Nation"] then
-			nationcount_numbervalue.Value += 1
-		end
-
-		print("[Point Init]:", point.Name, "entered by", player.Name)
-	end
-
-	local function remove_player(player: Player)
-		if not players_in_point[player] then return end -- not tracked
-
-		players_in_point[player] = nil
-		player_count -= 1
-
-		local team = player.Team
-		if team == game.Teams["Golden Empire"] then
-			empirecount_numbervalue.Value -= 1
-		elseif team == game.Teams["Royal Nation"] then
-			nationcount_numbervalue.Value -= 1
-		end
-
-		print("[Point Init]:", point.Name, "left by", player.Name)
-	end
-
-	capture_part.Touched:Connect(function(hit)
-		local character = hit.Parent
-		if not character then return end
-
-		local humanoid = character:FindFirstChild("Humanoid")
-		if not humanoid then return end
-
-		local player = game.Players:GetPlayerFromCharacter(character)
-		if not player then return end
-
-		add_player(player)
-	end)
-
-	capture_part.TouchEnded:Connect(function(hit)
-		local character = hit.Parent
-		if not character then return end
-
-		local humanoid = character:FindFirstChild("Humanoid")
-		if not humanoid then return end
-
-		local player = game.Players:GetPlayerFromCharacter(character)
-		if not player then return end
-
-		remove_player(player)
-	end)
-	
-	---------------- Loop
 	task.spawn(function()
 		while true do
-			task.wait(1) 
+			task.wait(1)
 
-			-- // take ownership
-			if progress_numbervalue.Value == 20 then
-				if empirecount_numbervalue.Value > nationcount_numbervalue.Value then
-					owner_stringvalue.Value = "Golden Empire"	
-					print("[GameManager::] set owner as Empire for:", point.Name)
-				elseif nationcount_numbervalue.Value > empirecount_numbervalue.Value then
-					owner_stringvalue.Value = "Royal Nation"
-					print("[GameManager::] set owner as Nation for:", point.Name)
+			local players = get_players_in_zone(capture_part)
+
+			local empire_n = 0
+			local nation_n = 0
+
+			for _, player in ipairs(players) do
+				if player.Team == game.Teams["Golden Empire"] then
+					empire_n += 1
+				elseif player.Team == game.Teams["Royal Nation"] then
+					nation_n += 1
+				end
+			end
+
+			empire_count.Value = empire_n
+			nation_count.Value = nation_n
+
+			local total = empire_n + nation_n
+
+			if progress.Value >= 20 then
+				if empire_n > nation_n then
+					owner.Value = "Golden Empire"
+				elseif nation_n > empire_n then
+					owner.Value = "Royal Nation"
 				else
-					owner_stringvalue.Value = ""
+					owner.Value = ""
 				end
-				
-			
-				progress_numbervalue.Value = 0
+				progress.Value = 0
 			end
 
-
-
-			if player_count <= 0 then	
-				if progress_numbervalue.Value > 0 then
-					progress_numbervalue.Value -= 1
+			if total == 0 then
+				if progress.Value > 0 then
+					progress.Value -= 1
 				end
-
 				continue
 			end
 
-			if empirecount_numbervalue.Value == nationcount_numbervalue.Value then
-				print("[GameManager::]", point.Name, "stalling... equal numbers.")
-				continue
-			end
+			if empire_n == nation_n then continue end
 
-			if empirecount_numbervalue.Value > nationcount_numbervalue.Value then
-				if owner_stringvalue.Value == "Golden Empire" then
-					continue -- already owned by empire
+			if empire_n > nation_n then
+				if owner.Value ~= "Golden Empire" then
+					progress.Value += 1
 				end
-				progress_numbervalue.Value += 1
-				print("[GameManager::]", point.Name, "Being capped by empire.")
-			elseif nationcount_numbervalue.Value > empirecount_numbervalue.Value then
-				if owner_stringvalue.Value == "Royal Nation" then
-					continue -- already owned by nation
+			else
+				if owner.Value ~= "Royal Nation" then
+					progress.Value += 1
 				end
-				progress_numbervalue.Value += 1
-				print("[GameManager::]", point.Name, "Being capped by nation.")
 			end
-			
-			
-			
 		end
 	end)
 end
 
+--------------------------------------------------
+-- Ticket Drain (NEW CORE SYSTEM)
+--------------------------------------------------
+
+local function handle_ticket_drain()
+	while true do
+		task.wait(3)
+
+		local total_points = #active_points
+		if total_points == 0 then continue end
+
+		local empire_points = 0
+		local nation_points = 0
+
+		for _, data in ipairs(active_points) do
+			if data.owner.Value == "Golden Empire" then
+				empire_points += 1
+			elseif data.owner.Value == "Royal Nation" then
+				nation_points += 1
+			end
+		end
+
+		local empire_drain = 3 * (nation_points / total_points)
+		local nation_drain = 3 * (empire_points / total_points)
+
+		-- Apply buffered drain
+		empire_buffer += empire_drain
+		nation_buffer += nation_drain
+
+		local e_whole = math.floor(empire_buffer)
+		local n_whole = math.floor(nation_buffer)
+
+		empire_buffer -= e_whole
+		nation_buffer -= n_whole
+
+		empire_rein_count.Value = math.max(0, empire_rein_count.Value - e_whole)
+		nation_rein_count.Value = math.max(0, nation_rein_count.Value - n_whole)
+
+		-- Win condition
+		if empire_rein_count.Value <= 0 then
+			print("[GameManager] Nation Wins!")
+			time_tick = false
+			break
+		elseif nation_rein_count.Value <= 0 then
+			print("[GameManager] Empire Wins!")
+			time_tick = false
+			break
+		end
+	end
+end
+
+--------------------------------------------------
+-- Map Placement (FIXED)
+--------------------------------------------------
+
+local function select_random_map()
+	local maps = core_maps:GetChildren()
+	return maps[math.random(1, #maps)]
+end
+
+local function place_map(map, point)
+	local clone = map:Clone()
+	clone:PivotTo(point.CFrame)
+	clone.Parent = point
+	return clone
+end
+
+--------------------------------------------------
+-- Start
+--------------------------------------------------
+
 function module.start_module()
-	print("[GameManager::] Running initial startup!")
+	print("[GameManager] Starting")
 
 	time_tick = true
-
 	task.spawn(begin_time)
 
 	local empire_team = game.Teams["Golden Empire"]
 	local nation_team = game.Teams["Royal Nation"]
 
-	task.spawn(function()
-		handle_reinforcements(
-			empire_rein_count,
-			empire_rein_wave_timer,
-			empire_team,
-			"Empire"
-		)
-	end)
+	task.spawn(handle_reinforcement_wave, empire_rein_count, empire_rein_wave_timer, empire_team)
+	task.spawn(handle_reinforcement_wave, nation_rein_count, nation_rein_wave_timer, nation_team)
 
-	task.spawn(function()
-		handle_reinforcements(
-			nation_rein_count,
-			nation_rein_wave_timer,
-			nation_team,
-			"Nation"
-		)
-	end)
-	
-	
-	-- // for loop on the capture point count
+	task.spawn(handle_ticket_drain)
+
+	local available_points = points_folder:GetChildren()
+	local used = {}
+
 	for i = 1, capture_points_count.Value do
-		local map = select_random_map()
-		local point_table = points_folder:GetChildren()
-
 		local point
 
 		repeat
-			point = point_table[math.random(1, #point_table)]
-		until #point:GetChildren() == 0
+			point = available_points[math.random(1, #available_points)]
+		until not used[point]
 
-		place_map(map, point)
-		fill_air_block(map)
-		detect_point_handling(point, map)
-		print("Placed map at point: " .. point.Name)
+		used[point] = true
+
+		local map = select_random_map()
+		local placed = place_map(map, point)
+
+		setup_capture_point(point, placed)
 	end
 end
 

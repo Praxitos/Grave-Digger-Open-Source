@@ -5,6 +5,7 @@ local module = {}
 -- Services
 local Players           = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService      = game:GetService("TweenService")
 
 -- Shared references
 local shared    = ReplicatedStorage:WaitForChild("Shared")
@@ -36,6 +37,9 @@ local ICONS = {
 	Royal_Nation_Background  = "rbxassetid://17519166185",
 }
 
+local FLASH_TWEEN_INFO = TweenInfo.new(0.4, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true)
+local FLASH_COLOR      = Color3.fromRGB(220, 50, 50)
+
 -- UI references (reassigned on respawn)
 local scoring_gui:        ScreenGui
 local score_frame:        Frame
@@ -47,13 +51,17 @@ local overhead_frame:     Frame
 local overhead_bar:       Frame
 local overhead_bgicon:    ImageLabel
 local overhead_label:     TextLabel
-local overhead_enemyin:   TextLabel
+local overhead_enemyin:   Frame
 local overhead_lockicon:  ImageLabel
 
 local local_player = Players.LocalPlayer
 
 -- Overhead sync connections; cleared whenever the player leaves a capture zone
 local overhead_connections: { RBXScriptConnection } = {}
+
+-- Active flash tweens keyed by frame, so we can stop them individually
+local active_flash_tweens: { [Frame]: Tween } = {}
+local flash_connections: { [Frame]: RBXScriptConnection } = {}
 
 
 -- Helpers
@@ -123,6 +131,96 @@ local function rebind_ui()
 	overhead_enemyin  = overhead_frame:FindFirstChild("enemyin")
 	overhead_lockicon = overhead_frame:FindFirstChild("lockicon")
 	refresh_ui()
+end
+
+
+-- Flash helpers
+local function start_flash(frame: Frame)
+	if active_flash_tweens[frame] then return end
+
+	frame.Visible = true
+	frame.BackgroundColor3 = FLASH_COLOR
+
+	local tween = TweenService:Create(frame, FLASH_TWEEN_INFO, {
+		BackgroundTransparency = 0
+	})
+
+	active_flash_tweens[frame] = tween
+	tween:Play()
+
+	-- Sync overhead
+	overhead_enemyin.Visible = true
+
+	if flash_connections[frame] then
+		flash_connections[frame]:Disconnect()
+	end
+
+	flash_connections[frame] = frame:GetPropertyChangedSignal("BackgroundTransparency"):Connect(function()
+		overhead_enemyin.BackgroundTransparency = frame.BackgroundTransparency
+	end)
+end
+
+local function stop_flash(frame: Frame)
+	-- Stop tween
+	local tween = active_flash_tweens[frame]
+	if tween then
+		tween:Cancel()
+		active_flash_tweens[frame] = nil
+	end
+
+	-- Disconnect sync
+	if flash_connections[frame] then
+		flash_connections[frame]:Disconnect()
+		flash_connections[frame] = nil
+	end
+
+	frame.BackgroundTransparency = 1
+	frame.Visible = false
+
+	overhead_enemyin.Visible = false
+end
+
+-- Returns true if enemy players are currently on the point
+local function enemy_is_contesting(empire_count: IntValue, nation_count: IntValue): boolean
+	local team = local_player.Team
+	if not team then return false end
+	if team.Name == "Golden Empire" then
+		return nation_count.Value > 0
+	else
+		return empire_count.Value > 0
+	end
+end
+
+-- Updates both the scoreboard enemyin frame and overhead enemyin frame for a point
+local function update_enemy_flash(
+	empire_count: IntValue,
+	nation_count: IntValue,
+	owner: StringValue,
+	scoreboard_enemyin: Frame
+)
+	local team = local_player.Team
+	if not team then
+		stop_flash(scoreboard_enemyin)
+		return
+	end
+
+	local enemy_present = false
+	local enemy_owns = false
+
+	if team.Name == "Golden Empire" then
+		enemy_present = nation_count.Value > 0
+		enemy_owns    = owner.Value == "Royal Nation"
+	else
+		enemy_present = empire_count.Value > 0
+		enemy_owns    = owner.Value == "Golden Empire"
+	end
+
+	-- Flash ONLY if enemy is present AND does NOT own the point
+	if enemy_present and not enemy_owns then
+		start_flash(scoreboard_enemyin)
+	else
+		stop_flash(scoreboard_enemyin)
+	end
 end
 
 
@@ -274,23 +372,31 @@ local function sync_overhead_to_point(point_name: string)
 	local progress     = folder:FindFirstChild(point_name .. "_Progress")
 	local owner        = folder:FindFirstChild(point_name .. "_Owner")
 
-	local control_ui  = objective_uis.control:FindFirstChild("objective" .. point_name)
-	local bar         = control_ui and control_ui:FindFirstChild("bar")    :: Frame
-	local bg_icon     = control_ui and control_ui:FindFirstChild("bgicon") :: ImageLabel
-	local point_label = control_ui and control_ui:FindFirstChild("label")  :: TextLabel
+	local control_ui      = objective_uis.control:FindFirstChild("objective" .. point_name)
+	local bar             = control_ui and control_ui:FindFirstChild("bar")     :: Frame
+	local bg_icon         = control_ui and control_ui:FindFirstChild("bgicon")  :: ImageLabel
+	local point_label     = control_ui and control_ui:FindFirstChild("label")   :: TextLabel
+	local scoreboard_enemyin = control_ui and control_ui:FindFirstChild("enemyin") :: Frame
 
-	-- Immediate sync on entry so the overhead never shows stale state
+	-- Immediate sync on entry
+	overhead_label.Text = point_name
 	apply_owner(owner.Value, bar, bg_icon, point_label, true)
 	apply_progress(progress.Value, empire_count.Value > nation_count.Value, bar, true)
+	update_enemy_flash(empire_count, nation_count, owner, scoreboard_enemyin)
 
+	-- Live updates while on the point
 	table.insert(overhead_connections, progress.Changed:Connect(function()
 		apply_progress(progress.Value, empire_count.Value > nation_count.Value, bar, true)
 	end))
 	table.insert(overhead_connections, owner.Changed:Connect(function()
 		apply_owner(owner.Value, bar, bg_icon, point_label, true)
 	end))
-
-	overhead_label.Text = point_name
+	table.insert(overhead_connections, empire_count.Changed:Connect(function()
+		update_enemy_flash(empire_count, nation_count, owner, scoreboard_enemyin)
+	end))
+	table.insert(overhead_connections, nation_count.Changed:Connect(function()
+		update_enemy_flash(empire_count, nation_count, owner, scoreboard_enemyin)
+	end))
 end
 
 local function bind_point_ui(point_name: string, control_ui: Frame)
@@ -300,10 +406,11 @@ local function bind_point_ui(point_name: string, control_ui: Frame)
 		return
 	end
 
-	local empire_count = folder:FindFirstChild(point_name .. "_Empire_Count")
-	local nation_count = folder:FindFirstChild(point_name .. "_Nation_Count")
-	local progress     = folder:FindFirstChild(point_name .. "_Progress")
-	local owner        = folder:FindFirstChild(point_name .. "_Owner")
+	local empire_count       = folder:FindFirstChild(point_name .. "_Empire_Count")
+	local nation_count       = folder:FindFirstChild(point_name .. "_Nation_Count")
+	local progress           = folder:FindFirstChild(point_name .. "_Progress")
+	local owner              = folder:FindFirstChild(point_name .. "_Owner")
+	local scoreboard_enemyin = control_ui:FindFirstChild("enemyin") :: Frame
 
 	local bar: Frame             = control_ui:FindFirstChild("bar")
 	local bg_icon: ImageLabel    = control_ui:FindFirstChild("bgicon")
@@ -312,9 +419,23 @@ local function bind_point_ui(point_name: string, control_ui: Frame)
 	progress.Changed:Connect(function()
 		apply_progress(progress.Value, empire_count.Value > nation_count.Value, bar, false)
 	end)
-
 	owner.Changed:Connect(function()
 		apply_owner(owner.Value, bar, bg_icon, point_label, false)
+	end)
+	
+	
+	update_enemy_flash(empire_count, nation_count, owner, scoreboard_enemyin)
+
+	empire_count.Changed:Connect(function()
+		update_enemy_flash(empire_count, nation_count, owner, scoreboard_enemyin)
+	end)
+
+	nation_count.Changed:Connect(function()
+		update_enemy_flash(empire_count, nation_count, owner, scoreboard_enemyin)
+	end)
+
+	owner.Changed:Connect(function()
+		update_enemy_flash(empire_count, nation_count, owner, scoreboard_enemyin)
 	end)
 end
 
@@ -333,6 +454,8 @@ local function bind_capture_point_proximity(model: Model, point_name: string)
 		if hit.Parent ~= local_player.Character then return end
 		if not overhead_frame.Visible then return end
 		overhead_frame.Visible = false
+		-- Stop the overhead flash but leave the scoreboard flash running
+		stop_flash(overhead_enemyin)
 		clear_overhead_connections()
 	end)
 end
