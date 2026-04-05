@@ -1,4 +1,3 @@
---!strict
 --!native
 --!optimize 2
 
@@ -17,9 +16,11 @@ local Assets         = ReplicatedStorage.Shared.Assets
 local Holster_Folder = Assets.Guns.Holsters:FindFirstChild("Gun Holsters")
 local Tool_Folder    = Assets.Guns.ToolModels
 local Anim_Folder    = Assets.Animations.Tools.Guns.GraceRevolver
-local Effects_Folder = Assets.Guns.Effects.Shooting
+local FxFolder      = Assets.Guns.Effects.Shooting
 
-local muzzle_flash = Effects_Folder.Muzzle_Flash
+local FX_MUZZLE_FLASH = FxFolder.Muzzle_Flash
+local FX_WOOD_CHIPS   = FxFolder.Parent.Environment.Wood_Chips
+local FX_BULLET_HOLE  = FxFolder.BulletHole
 
 -- // Tuning
 
@@ -27,12 +28,12 @@ local FIRE_RATE = 0.25
 
 -- // Animation Priority Layers
 --
---  LAYER 0 - base idle/aim:  Held, Aim, Aim_Left
+--  LAYER 0 - base idle/aim:  Hold, Aim, Aim_Left
 --  LAYER 1 - action overlay: Fire, Fire_Left, Fire_Empty, Fire_Empty_Left, Short, Short_Alt, Spin, Spin_Start
 --  LAYER 2 - full takeover:  Draw, Unequip, Check, Reload_Start, Reload_Loop, Reload_End, Melee1, Melee2
 
 local ANIM_LAYER: {[string]: number} = {
-	Held            = 0,
+	Hold            = 0,
 	Aim             = 0,
 	Aim_Left        = 0,
 
@@ -122,7 +123,7 @@ function GraceRevolver.new(info: Types.BaseToolCreateInfo): GraceRevolver
 	}
 
 	self.animations = {
-		Held    = Anim_Folder.GraceRevolver_Held,
+		Hold    = Anim_Folder.GraceRevolver_Held,
 		Draw    = Anim_Folder.GraceRevolver_Draw,
 		Unequip = Anim_Folder.GraceRevolver_Unequip,
 
@@ -170,7 +171,7 @@ function GraceRevolver.new(info: Types.BaseToolCreateInfo): GraceRevolver
 		bulletTemplate  = FxFolder.Bullet,
 		bulletContainer = workspace.Game_Details.Effects.Bullets,
 		onHit           = function(cast, result, velocity)
-			self:_onBulletHit(cast, result, velocity, self.Penetration_Level)
+			self:_onBulletHit(cast, result, velocity, self.actual_model.GraceRevolver_Muzzle,  self.Penetration_Level)
 		end,
 	})
 
@@ -244,17 +245,17 @@ function GraceRevolver:_restoreBase()
 	if self.Aiming then
 		if self.current_shoulder == "Right" then
 			if anims.Aim_Left and anims.Aim_Left.IsPlaying then anims.Aim_Left:Stop() end
-			if anims.Held     and anims.Held.IsPlaying     then anims.Held:Stop()     end
+			if anims.Hold     and anims.Hold.IsPlaying     then anims.Hold:Stop()     end
 			if not anims.Aim.IsPlaying then self:_playAnim("Aim") end
 		else
 			if anims.Aim  and anims.Aim.IsPlaying  then anims.Aim:Stop()  end
-			if anims.Held and anims.Held.IsPlaying  then anims.Held:Stop() end
+			if anims.Hold and anims.Hold.IsPlaying  then anims.Hold:Stop() end
 			if not anims.Aim_Left.IsPlaying then self:_playAnim("Aim_Left") end
 		end
 	else
 		if anims.Aim     and anims.Aim.IsPlaying     then anims.Aim:Stop()     end
 		if anims.Aim_Left and anims.Aim_Left.IsPlaying then anims.Aim_Left:Stop() end
-		if not anims.Held.IsPlaying then self:_playAnim("Held") end
+		if not anims.Hold.IsPlaying then self:_playAnim("Hold") end
 	end
 end
 
@@ -312,7 +313,7 @@ end
 
 -- // Tool Actions
 
--- Cleanly exits aim. Explicitly stops Held so it doesn't bleed into the
+-- Cleanly exits aim. Explicitly stops Hold so it doesn't bleed into the
 -- reversed Aim playback when called from ammo_check or reload.
 function GraceRevolver:end_aiming()
 	self.Aiming = false
@@ -320,9 +321,9 @@ function GraceRevolver:end_aiming()
 
 	local anims = self.RegisteredAnimations
 
-	-- Stop Held immediately — it should not be playing during aim exit.
-	if anims.Held and anims.Held.IsPlaying then
-		anims.Held:Stop()
+	-- Stop Hold immediately — it should not be playing during aim exit.
+	if anims.Hold and anims.Hold.IsPlaying then
+		anims.Hold:Stop()
 	end
 
 	local aimAnim = anims.Aim
@@ -352,7 +353,7 @@ function GraceRevolver:aim()
 		self.Aiming = true
 		self:_startAimTracking()
 
-		-- Stop Held before playing aim so they don't blend.
+		-- Stop Hold before playing aim so they don't blend.
 		local anims = self.RegisteredAnimations
 		self:_stopAllExcept()
 
@@ -446,10 +447,13 @@ function GraceRevolver:fire()
 		end
 	end)
 
+	local muzzleEquipped = game.Players.LocalPlayer.Character
+		.CharacterData.Equipment.GraceRevolver.GraceRevolver_Muzzle
 	self:emit_effect(
-		muzzle_flash,
-		{"smoke_medium"},
-		game.Players.LocalPlayer.Character.CharacterData.Equipment.GraceRevolver.GraceRevolver_Muzzle,
+		FX_MUZZLE_FLASH,
+		muzzleEquipped.CFrame * CFrame.new(-0.1, 0, -2),
+		{ "smoke_medium", "smoke_forward", "flash_general" },
+		muzzleEquipped,
 		1,
 		false
 	)
@@ -513,7 +517,7 @@ function GraceRevolver:_on_equip()
 	self:_initShoulderTracking()
 	game.Players.LocalPlayer.Character:SetAttribute("Sprint_Animation", "GraceRevolver")
 	
-	self:_playAnim("Held")
+	self:_playAnim("Hold")
 end
 
 function GraceRevolver:_on_unequip()
