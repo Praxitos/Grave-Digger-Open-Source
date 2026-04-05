@@ -155,6 +155,8 @@ function GraceRevolver.new(info: Types.BaseToolCreateInfo): GraceRevolver
 	self.Ammo_Type    = ".45 Lead"
 	self.recoil       = 8
 	self.recoil_count = 5
+	self.Penetration_Level       = 1
+	self.Armor_Penetration_Level = 2
 
 	self.unequip_wait     = false
 	self.Aiming           = false
@@ -165,10 +167,10 @@ function GraceRevolver.new(info: Types.BaseToolCreateInfo): GraceRevolver
 	self._spinCancelled   = false
 
 	self.Caster, self.CasterBehavior = Util.setupFastCast({
-		bulletTemplate  = Effects_Folder.Bullet,
-		bulletContainer = workspace,
-		onHit = function(_, result, _)
-			print("Hit:", result.Instance, result.Position)
+		bulletTemplate  = FxFolder.Bullet,
+		bulletContainer = workspace.Game_Details.Effects.Bullets,
+		onHit           = function(cast, result, velocity)
+			self:_onBulletHit(cast, result, velocity)
 		end,
 	})
 
