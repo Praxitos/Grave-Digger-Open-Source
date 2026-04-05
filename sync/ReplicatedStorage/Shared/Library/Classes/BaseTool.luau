@@ -312,16 +312,10 @@ function BaseTool:_initShoulderTracking()
 
 	self._shoulderChangedConn = player:GetAttributeChangedSignal("Current_Shoulder"):Connect(function()
 		self.current_shoulder = player:GetAttribute("Current_Shoulder") or "Right"
-		-- re-cache aim C0s so the tracker doesn't fight the post-swap animation pose
-		if self._aimConnection and self._leftShoulder and self._rightShoulder then
-			-- give the animation one frame to settle before re-caching
-			task.defer(function()
-				if self._leftShoulder and self._rightShoulder then
-					self._leftShoulderC0  = self._leftShoulder.C0
-					self._rightShoulderC0 = self._rightShoulder.C0
-				end
-			end)
-		end
+		-- DO NOT re-cache _leftShoulderC0/_rightShoulderC0 here.
+		-- Those are set once when aim starts (_startAimTracking) from the resting pose.
+		-- Re-caching during a swap reads the live motor C0 which is already offset
+		-- by the aim lerp — using that as the new origin causes compounding upward drift.
 		if self._onShoulderChanged then
 			self:_onShoulderChanged()
 		end

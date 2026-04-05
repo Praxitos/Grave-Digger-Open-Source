@@ -1,3 +1,7 @@
+--!strict
+--!native
+--!optimize 2
+
 --------------------------------------------------------------------------------
 -- PrinceRifle
 -- Bolt-action rifle with manual cycling, shoulder-swappable aiming, and an
@@ -251,6 +255,7 @@ end
 -- Must only be called once _isBusy() is false.
 function PrinceRifle:_restoreBase()
 	if self:_isBusy() then return end
+	if not self.Equipped then return end  -- never play animations after unequip
 
 	local anims = self.RegisteredAnimations
 	if not anims then return end
@@ -314,29 +319,24 @@ end
 --------------------------------------------------------------------------------
 
 -- Called by BaseTool when Current_Shoulder changes.
--- Resets motor6D to its canonical C0 before BaseTool's deferred re-cache fires,
--- preventing the lerp loop from compounding mid-lerp offsets as the new origin.
--- Double-defers the anim swap so both the cache commit and any lerp-reset
--- have fully settled before a new animation touches the motor.
+-- current_shoulder is already updated by BaseTool before this fires.
+-- If cycling: do nothing — cycle() hard-stops all tracks anyway, and
+-- _restoreBase at the end will pick up the new shoulder value cleanly.
+-- If aiming normally: swap aim tracks immediately.
 function PrinceRifle:_onShoulderChanged()
-	if self:_isBusy() then
-		-- The active action will call _restoreBase on completion,
-		-- picking up the new shoulder value at that point.
-		return
-	end
-
+	if self.Cycling then return end
 	if not self.Aiming then return end
 
-	if self.motor_6d and self._motorOriginal then
-		self.motor_6d.C0 = self._motorOriginal.C0
-	end
+	local anims = self.RegisteredAnimations
+	if not anims then return end
 
-	task.defer(function()
-		task.defer(function()
-			if self:_isBusy() or not self.Aiming then return end
-			self:_restoreBase()
-		end)
-	end)
+	if self.current_shoulder == "Right" then
+		if anims.Aim_Left and anims.Aim_Left.IsPlaying then anims.Aim_Left:Stop(0) end
+		if anims.Aim and not anims.Aim.IsPlaying then anims.Aim:Play() end
+	else
+		if anims.Aim and anims.Aim.IsPlaying then anims.Aim:Stop(0) end
+		if anims.Aim_Left and not anims.Aim_Left.IsPlaying then anims.Aim_Left:Play() end
+	end
 end
 
 --------------------------------------------------------------------------------
@@ -433,6 +433,10 @@ end
 
 -- Plays the bolt-cycle animation. Hard-stops ALL other tracks first so
 -- nothing from the previous state bleeds into the cycle clip.
+-- Ammo count is shown when the "vfx_ammo_show" keyframe is hit mid-animation
+-- (add that marker in the animation editor at whatever point feels natural —
+-- roughly when the bolt is fully open). Falls back to showing after the
+-- animation ends if the keyframe is not present.
 function PrinceRifle:cycle()
 	if self.Cycling then return end
 	self.Cycling = true
@@ -443,6 +447,7 @@ function PrinceRifle:cycle()
 		return
 	end
 
+	-- Flush every track except Cycle itself.
 	for name, track in pairs(anims) do
 		if name == "Cycle" then continue end
 		if not track:IsA("AnimationTrack") then continue end
@@ -457,9 +462,7 @@ function PrinceRifle:cycle()
 	self.Cycled  = true
 	self.Cycling = false
 
-	-- Defer one frame so any action that began exactly as Cycle ended
-	-- has time to raise its busy flag before we attempt a restore.
-	task.defer(function() self:_restoreBase() end)
+	self:_restoreBase() 
 end
 
 -- Fires one round: spawns projectile, applies recoil, plays animation and
@@ -606,6 +609,8 @@ end
 --------------------------------------------------------------------------------
 
 function PrinceRifle:_on_equip()
+	self.Equipped = true
+
 	self:_cacheMotor6D()
 	self:_connectInput()
 	self:_initShoulderTracking()
@@ -634,6 +639,7 @@ function PrinceRifle:_on_equip()
 end
 
 function PrinceRifle:_on_unequip()
+	self.Equipped = false
 	self._reloadCancelled = true -- cancel any in-progress reload
 
 	self:_disconnectInput()
