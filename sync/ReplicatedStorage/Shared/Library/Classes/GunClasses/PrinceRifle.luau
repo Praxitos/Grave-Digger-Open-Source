@@ -166,7 +166,7 @@ function PrinceRifle.new(info: Types.BaseToolCreateInfo): PrinceRifle
 		bulletTemplate  = FxFolder.Bullet,
 		bulletContainer = workspace.Game_Details.Effects.Bullets,
 		onHit           = function(cast, result, velocity)
-			self:_onBulletHit(cast, result, velocity)
+			self:_onBulletHit(cast, result, velocity, self.Penetration_Level)
 		end,
 	})
 

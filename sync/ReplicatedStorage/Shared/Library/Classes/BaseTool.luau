@@ -1,4 +1,4 @@
---!strict
+
 --!native
 --!optimize 2
 
@@ -17,9 +17,11 @@ local Assets         = ReplicatedStorage.Shared.Assets
 local Holster_Folder = Assets.Guns.Holsters:FindFirstChild("Gun Holsters")
 local Tool_Folder    = Assets.Guns.ToolModels
 local Anim_Folder    = Assets.Animations.Tools.Guns.PrinceRifle
-local Effects_Folder = Assets.Guns.Effects.Shooting
+local FxFolder      = Assets.Guns.Effects.Shooting
 
-local bullet_hole = Effects_Folder.BulletHole
+local FX_MUZZLE_FLASH = FxFolder.Muzzle_Flash
+local FX_WOOD_CHIPS   = FxFolder.Parent.Environment.Wood_Chips
+local FX_BULLET_HOLE  = FxFolder.BulletHole
 -- // Tuning (shared defaults; subclasses can override on self)
 
 local AIM_PITCH_LIMIT  = math.rad(60)
@@ -30,6 +32,28 @@ local MOTOR_SNAP_DIST  = 0.001
 local BaseTool = {}
 BaseTool.__index = BaseTool
 
+local Penetration_Profiles = {
+	[4] = {
+	["Stud_Limit"] = 4,
+	["Materials"] = {Enum.Material.Wood, Enum.Material.WoodPlanks},
+	["Distance_Limiter"] = 70,		
+	},
+	[3] = {
+	["Stud_Limit"] = 3,
+	["Materials"] = {Enum.Material.Wood, Enum.Material.WoodPlanks},
+	["Distance_Limiter"] = 50,	
+	},
+	[2] = {
+	["Stud_Limit"] = 2,
+	["Materials"] = {Enum.Material.Wood, Enum.Material.WoodPlanks},
+	["Distance_Limiter"] = 30,	
+	},
+	[1] = {
+	["Stud_Limit"] = 1,
+	["Materials"] = {},
+	["Distance_Limiter"] = 0,	
+	},
+}
 
 export type BaseTool = typeof(setmetatable({} :: {
 	className: "BaseTool",
@@ -363,51 +387,97 @@ function BaseTool:_startAimTracking()
 	end)
 end
 
-function BaseTool:_onBulletHit(cast: any, result: RaycastResult, velocity: Vector3)
-	-- Surface VFX
-	if result.Material == Enum.Material.Wood then
+function BaseTool:_onBulletHit(cast: any, result: RaycastResult, velocity: Vector3, Penetration_Level: number)
+	local profile = Penetration_Profiles[Penetration_Level] -- or however you select this dynamically
+	if not profile then return end
+
+	local instance = result.Instance
+	local material = result.Material
+	local direction = cast.UserData.Direction :: Vector3
+
+	-- Prevent double-penetration
+	if cast.UserData.Penetrated then return end
+
+	-- Muzzle check
+	local muzzle = self.actual_model and self.actual_model.PrinceRifle_Muzzle
+	if not muzzle then return end
+
+	local distanceFromMuzzle = (muzzle.Position - result.Position).Magnitude
+	if distanceFromMuzzle > profile.Distance_Limiter then
+		cast.UserData.Penetrated = true
+		return
+	end
+
+	-- Material check
+	local canPenetrateMaterial = false
+	for _, mat in ipairs(profile.Materials) do
+		if mat == material then
+			canPenetrateMaterial = true
+			break
+		end
+	end
+
+	if not canPenetrateMaterial then
+		cast.UserData.Penetrated = true
+		return
+	end
+
+	-- Entry effects (always happens on hit)
+	self:bullet_hole(result.Position, result.Normal)
+
+	if material == Enum.Material.Wood then
 		self:emit_effect(
 			FX_WOOD_CHIPS,
 			CFrame.new(result.Position, result.Position + result.Normal),
 			{ "woodchip1", "woodchip2", "woodchip3" },
-			result.Instance,
+			instance,
 			20,
 			false
 		)
 	end
 
-	if cast.UserData.Penetrated then return end
+	-- Thickness check (forward ray through object)
+	local thicknessParams = RaycastParams.new()
+	thicknessParams.FilterType = Enum.RaycastFilterType.Include
+	thicknessParams.FilterDescendantsInstances = { instance }
 
-	-- Range check: no penetration beyond PENETRATION_RANGE studs
-	local muzzle = self.actual_model and self.actual_model.PrinceRifle_Muzzle
-	if not muzzle or (muzzle.Position - result.Position).Magnitude > PENETRATION_RANGE then
+	local thicknessResult = workspace:Raycast(
+		result.Position + direction * 0.05,
+		direction * profile.Stud_Limit,
+		thicknessParams
+	)
+
+	-- If we DIDN'T exit the object within Stud_Limit → too thick
+	if thicknessResult then
 		cast.UserData.Penetrated = true
 		return
 	end
 
-	local direction = cast.UserData.Direction :: Vector3
-
-	-- Entry decal
-	self:bullet_hole(result.Position, result.Normal)
-
-	-- Trace the exit point from the far side back toward entry
+	-- Find exit point (reverse trace like you had, but bounded)
 	local exitParams = RaycastParams.new()
 	exitParams.FilterType = Enum.RaycastFilterType.Include
-	exitParams.FilterDescendantsInstances = { result.Instance }
+	exitParams.FilterDescendantsInstances = { instance }
 
-	local exitResult = workspace:Raycast(result.Position + direction * 100, -direction * 100, exitParams)
+	local exitResult = workspace:Raycast(
+		result.Position + direction * profile.Stud_Limit,
+		-direction * profile.Stud_Limit,
+		exitParams
+	)
+
 	if exitResult then
 		self:bullet_hole(exitResult.Position, exitResult.Normal)
 	end
 
-	-- Continue cast through geometry
+	-- Continue bullet
 	cast.UserData.Penetrated = true
+
 	local continuation = self.Caster:Fire(
 		result.Position + direction * 0.2,
 		direction,
 		velocity.Magnitude,
 		self.CasterBehavior
 	)
+
 	continuation.UserData.Direction  = direction
 	continuation.UserData.Penetrated = true
 end
@@ -539,7 +609,7 @@ end
 function BaseTool:bullet_hole(position, normal)
 	local bulletholes_folder = workspace.Game_Details.Effects.BulletHoles
 
-	local bullethole_clone = bullet_hole:Clone()
+	local bullethole_clone = FX_BULLET_HOLE:Clone()
 	bullethole_clone.CFrame = CFrame.new(position, position + normal)
 	bullethole_clone.Parent = bulletholes_folder
 end
