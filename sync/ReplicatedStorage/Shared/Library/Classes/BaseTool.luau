@@ -387,7 +387,7 @@ function BaseTool:_startAimTracking()
 	end)
 end
 
-function BaseTool:_onBulletHit(cast: any, result: RaycastResult, velocity: Vector3, Penetration_Level: number)
+function BaseTool:_onBulletHit(cast: any, result: RaycastResult, velocity: Vector3, muzzle: Part, Penetration_Level: number)
 	local profile = Penetration_Profiles[Penetration_Level] -- or however you select this dynamically
 	if not profile then return end
 
@@ -398,8 +398,6 @@ function BaseTool:_onBulletHit(cast: any, result: RaycastResult, velocity: Vecto
 	-- Prevent double-penetration
 	if cast.UserData.Penetrated then return end
 
-	-- Muzzle check
-	local muzzle = self.actual_model and self.actual_model.PrinceRifle_Muzzle
 	if not muzzle then return end
 
 	local distanceFromMuzzle = (muzzle.Position - result.Position).Magnitude
