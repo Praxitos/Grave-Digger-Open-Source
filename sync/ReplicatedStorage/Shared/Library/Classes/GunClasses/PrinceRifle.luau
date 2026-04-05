@@ -20,6 +20,7 @@ local Anim_Folder    = Assets.Animations.Tools.Guns.PrinceRifle
 local Effects_Folder = Assets.Guns.Effects.Shooting
 
 local muzzle_flash = Effects_Folder.Muzzle_Flash
+local wood_chips = Effects_Folder.Parent.Environment.Wood_Chips
 
 -- // Tuning
 
@@ -125,6 +126,8 @@ function PrinceRifle.new(info: Types.BaseToolCreateInfo): PrinceRifle
 	self.Ammo_Type    = "8mm Smokeless"
 	self.recoil       = 10
 	self.recoil_count = 6
+	self.Penetration_Level = 2
+	self.Armor_Penetration_Level = 3
 
 	self.unequip_wait     = true
 	self.Cycled           = true
@@ -137,9 +140,46 @@ function PrinceRifle.new(info: Types.BaseToolCreateInfo): PrinceRifle
 
 	self.Caster, self.CasterBehavior = Util.setupFastCast({
 		bulletTemplate  = Effects_Folder.Bullet,
-		bulletContainer = workspace,
-		onHit = function(_, result, _)
-			print("Hit:", result.Instance, result.Position)
+		bulletContainer = workspace.Game_Details.Effects.Bullets,
+		onHit = function(cast, result, velocity, cosmeticBullet)
+			if result.Material == Enum.Material.Wood then
+				self:emit_effect(wood_chips, CFrame.new(result.Position, result.Position + result.Normal), {"woodchip1", "woodchip2", "woodchip3"},  result.Instance, 20, false)
+				print("wood")
+			end
+			
+			if cast.UserData.Penetrated then return end
+			
+			-- // make sure it isn't 50+ studs away, if it is, cant penetrate
+			if (self.actual_model.PrinceRifle_Muzzle.Position - result.Position).Magnitude > 50 then
+				print("cannot penetrate. Magn is:", (self.model_reference.PrinceRifle_Muzzle.Position - result.Position).Magnitude)
+				cast.UserData.Penetrated = true
+				return
+			end
+			
+			print("Can penetrate")
+			local direction = cast.UserData.Direction  -- move this up before first use
+
+			self:bullet_hole(result.Position, result.Normal)
+
+			local behindPoint = result.Position + direction * 100
+			local exitRay = RaycastParams.new()
+			exitRay.FilterType = Enum.RaycastFilterType.Include
+			exitRay.FilterDescendantsInstances = { result.Instance }
+
+			local exitResult = workspace:Raycast(behindPoint, -direction * 100, exitRay)
+			if exitResult then
+				self:bullet_hole(exitResult.Position, exitResult.Normal)
+			end
+
+			cast.UserData.Penetrated = true
+			local newCast = self.Caster:Fire(
+				result.Position + direction * 0.2,
+				direction,
+				velocity.Magnitude,
+				self.CasterBehavior
+			)
+			newCast.UserData.Direction = direction
+			newCast.UserData.Penetrated = true
 		end,
 	})
 
@@ -372,7 +412,10 @@ function PrinceRifle:fire()
 	end
 
 	local camera = workspace.CurrentCamera
-	self.Caster:Fire(muzzle.Position, camera.CFrame.LookVector.Unit, 1000, self.CasterBehavior)
+	local fireDirection = muzzle.CFrame.LookVector.Unit
+	local activeCast = self.Caster:Fire(muzzle.Position, fireDirection, 1000, self.CasterBehavior)
+	activeCast.UserData.Direction = fireDirection
+	activeCast.UserData.Penetrated = false
 
 	local anims    = self.RegisteredAnimations
 	local fireAnim = (self.current_shoulder == "Right") and anims.Fire or anims.Fire_Left
@@ -394,7 +437,8 @@ function PrinceRifle:fire()
 
 	self:emit_effect(
 		muzzle_flash,
-		{"smoke_medium"},
+		game.Players.LocalPlayer.Character.CharacterData.Equipment.PrinceRifle.PrinceRifle_Muzzle.CFrame * CFrame.new(-0.1, 0, -2),
+		{"smoke_medium", "smoke_forward", "flash_general"},
 		game.Players.LocalPlayer.Character.CharacterData.Equipment.PrinceRifle.PrinceRifle_Muzzle,
 		1,
 		false
@@ -406,6 +450,10 @@ function PrinceRifle:fire()
 	if self.Alt_Mode then
 		self:_alt_reload()
 	end
+	
+	self.Caster.CastTerminating:Connect(function()
+		print("terminated")
+	end)
 end
 
 -- Alt reload: lever-action slap animation.

@@ -6,6 +6,8 @@ local Players = game:GetService("Players")
 local Animations_Folder = game:GetService("ReplicatedStorage").Shared.Assets.Animations.Character.Walking.Standing.Walk_Forward
 local Ragdoll_Status = require(game:GetService("ReplicatedStorage").Shared.Library.Classes.StatusClasses.RagdollStatus)
 
+local testing_boolean = game.ReplicatedStorage.Shared.Library.Configuration.Game_Variables.Testing_Boolean
+
 local function setup_gamedata(player: Player)
 	local player_data_folder = Instance.new("Folder")
 	player_data_folder.Name = "GameData"
@@ -97,6 +99,9 @@ end
 
 
 function module.start_module()
+	if testing_boolean.Value == true then
+		Players.CharacterAutoLoads = true
+	end
 	for _, player in ipairs(Players:GetPlayers()) do
 		setup_player(player)
 	end
@@ -104,8 +109,6 @@ function module.start_module()
 	Players.PlayerAdded:Connect(function(player: Player)
 		setup_player(player)
 	end)
-	
-	print("Ran playersetup...")
 end
 
 return module

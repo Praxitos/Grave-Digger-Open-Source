@@ -13,6 +13,13 @@ local utilities_module = require(
 
 local LOCAL_PLAYER = Players.LocalPlayer
 
+local Assets         = ReplicatedStorage.Shared.Assets
+local Holster_Folder = Assets.Guns.Holsters:FindFirstChild("Gun Holsters")
+local Tool_Folder    = Assets.Guns.ToolModels
+local Anim_Folder    = Assets.Animations.Tools.Guns.PrinceRifle
+local Effects_Folder = Assets.Guns.Effects.Shooting
+
+local bullet_hole = Effects_Folder.BulletHole
 -- // Tuning (shared defaults; subclasses can override on self)
 
 local AIM_PITCH_LIMIT  = math.rad(60)
@@ -178,7 +185,7 @@ function BaseTool:equip()
 				end
 			end
 
-			self.RegisteredAnimations.Held:Play()
+			self.RegisteredAnimations.Hold:Play()
 		end
 	end)
 	
@@ -286,7 +293,7 @@ function BaseTool:ammo_check()
 		end
 	end
 
-	self.RegisteredAnimations.Held:Play()
+	self.RegisteredAnimations.Hold:Play()
 end
 
 -- // Shoulder Tracking (shared by all armed tools)
@@ -437,19 +444,16 @@ end
 -- // Effect Automation
 function BaseTool:emit_effect(
 	effect: Part,
+	CFrame: CFrame,
 	target_tables: {string},
 	parent: Instance,
 	emit_count: number,
 	attach_to_parent: boolean
 )
-	print("Emitting effect received with:", effect.Name, target_tables, parent.Name, emit_count)
 
 	emit_count = emit_count or 10
 
-	print("Children count:", #effect:GetChildren())
-
 	for _, child in pairs(effect:GetDescendants()) do
-		print("Checking:", child.Name, child.ClassName)
 
 		local match = table.find(target_tables, child.Name) 
 			or table.find(target_tables, child.ClassName)
@@ -471,20 +475,16 @@ function BaseTool:emit_effect(
 			part.Transparency = 1
 			part.Parent = workspace
 
-			-- Offset relative to muzzle orientation
-			local offset = CFrame.new(-0.1, 0, -2)
-			part.CFrame = parent.CFrame * offset
+			part.CFrame = CFrame
 
 			clone.Parent = part
 			container = part
 		end
 
-		print("Cloned:", child.Name, "->", clone.Parent.Name)
 
 		if clone:IsA("ParticleEmitter") then
 			clone.Enabled = true
 			clone:Emit(emit_count)
-			print("EMITTED:", child.Name, emit_count)
 
 			-- Cleanup based on lifetime
 			local lifetime = clone.Lifetime.Max
@@ -493,21 +493,24 @@ function BaseTool:emit_effect(
 				if attach_to_parent then
 					if clone then
 						clone:Destroy()
-						print("Cleaned emitter:", child.Name)
 					end
 				else
 					if container then
 						container:Destroy()
-						print("Cleaned container part")
 					end
 				end
 			end)
 		end
 	end
-
-	print("Effect emitted")
 end
 
+function BaseTool:bullet_hole(position, normal)
+	local bulletholes_folder = workspace.Game_Details.Effects.BulletHoles
+
+	local bullethole_clone = bullet_hole:Clone()
+	bullethole_clone.CFrame = CFrame.new(position, position + normal)
+	bullethole_clone.Parent = bulletholes_folder
+end
 -- // Cleanup
 
 function BaseTool:destroy()

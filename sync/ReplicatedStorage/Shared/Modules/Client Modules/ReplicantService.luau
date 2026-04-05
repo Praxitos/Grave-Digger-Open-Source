@@ -29,6 +29,9 @@ local empire_wave_timer = empire_config.Empire_Rein_Wave_Timer
 local nation_rein_count = nation_config.Nation_Rein_Count
 local nation_wave_timer = nation_config.Nation_Rein_Wave_Timer
 
+local visualize_casts_boolean = config.Parent.Ranged_Variables.Visualizations.Visualize_Casts
+local fastcast_module = require(shared.Library.Externals.FastCast)
+
 -- Constants
 local MAX_REIN = 500
 
@@ -499,6 +502,13 @@ end
 
 function module.start_module()
 	rebind_ui()
+	
+	fastcast_module.VisualizeCasts = visualize_casts_boolean.Value
+
+	visualize_casts_boolean:GetPropertyChangedSignal("Value"):Connect(function()
+		fastcast_module.VisualizeCasts = visualize_casts_boolean.Value
+		print("[GameManager] Cast visualization set to", visualize_casts_boolean.Value)
+	end)
 
 	for _, player in pairs(Players:GetPlayers()) do
 		setup_player(player)

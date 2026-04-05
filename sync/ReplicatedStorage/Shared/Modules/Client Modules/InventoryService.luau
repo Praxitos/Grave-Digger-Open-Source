@@ -243,6 +243,12 @@ local function equip_tool(toolObject)
 end
 
 local function assign_tool(toolObject)
+	
+	if toolObject.Designation == "Nil" then
+		print("[INVENTORY] assign_tool: tool has nil designation, skipping")
+		return
+	end
+	
 	print("[INVENTORY] assign_tool called for", toolObject)
 
 	if find_existing_tool(toolObject) then

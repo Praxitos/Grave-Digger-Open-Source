@@ -45,7 +45,7 @@ local COLLISION_OFFSET = 0.25
 
 local FREELOOK_PAN_SPEED      = 8
 local FREELOOK_PAN_THRESHOLD  = 0.25
-local FREELOOK_ORBIT_DISTANCE = 8
+local FREELOOK_ORBIT_DISTANCE = 5
 
 local FIRST_PERSON_DEBOUNCE = 0.2
 local SHOULDER_DEBOUNCE     = 0.2
@@ -657,7 +657,6 @@ function BaseCamera:Update(dt: number)
 		rayOrigin  = headPos
 
 	elseif self.IsFreeLook then
-
 		if self.FreeLookPhase == "panning" then
 			local orbitPos = headPos - rotation.LookVector * FREELOOK_ORBIT_DISTANCE
 			self.SmoothedPos = lerpVec(self.SmoothedPos, orbitPos, FREELOOK_PAN_SPEED, dt)

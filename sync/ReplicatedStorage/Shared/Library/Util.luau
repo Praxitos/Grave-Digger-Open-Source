@@ -199,27 +199,38 @@ end
 
 	Returns: caster, behavior
 ]]
+
+
 function Util.setupFastCast(config: {
 	bulletTemplate: Instance,
 	bulletContainer: Instance,
 	trailFadeTime: number?,
 	trailColor: BrickColor?,
 	trailThickness: number?,
+	penetrationLevel: number?,
+	armorPenetrationLevel: number?,
 	onHit: ((cast: any, result: RaycastResult, cosmeticBullet: BasePart?) -> ())?,
 	})
 	local FastCast = require(game:GetService("ReplicatedStorage").Shared.Library.Externals.FastCast)
+	local TweenService = game:GetService("TweenService")
 
 	local caster = FastCast.new()
 	local behavior = FastCast.newBehavior()
 
+	-- RaycastParams setup to hit everything except the bullets themselves
 	local rayParams = RaycastParams.new()
-	rayParams.FilterType = Enum.RaycastFilterType.Blacklist
 	rayParams.IgnoreWater = true
+	rayParams.FilterType = Enum.RaycastFilterType.Exclude
+	rayParams.FilterDescendantsInstances = { config.bulletContainer }
+	behavior.RaycastParams = rayParams
 
 	behavior.RaycastParams = rayParams
 	behavior.CosmeticBulletTemplate = config.bulletTemplate
 	behavior.CosmeticBulletContainer = config.bulletContainer
 	behavior.AutoIgnoreContainer = true
+
+	behavior.HighFidelityBehavior = FastCast.HighFidelityBehavior.Always
+	behavior.HighFidelitySegmentSize = 0.1 -- smaller segments for fast bullets
 
 	local fadeTime = config.trailFadeTime or 0.15
 	local trailColor = config.trailColor or BrickColor.new("White")
@@ -267,7 +278,10 @@ function Util.setupFastCast(config: {
 
 	caster.RayHit:Connect(function(cast, result, velocity, cosmeticBullet)
 		if config.onHit then
-			config.onHit(cast, result, cosmeticBullet)
+			local success, err = pcall(config.onHit, cast, result, velocity, cosmeticBullet)
+			if not success then
+				warn("[FastCast::onHit ERROR]:", err)
+			end
 		end
 
 		if cosmeticBullet then

@@ -4,7 +4,7 @@
 
 local FastCast = {}
 FastCast.DebugLogging = false
-FastCast.VisualizeCasts = false
+FastCast.VisualizeCasts = true
 FastCast.__index = FastCast
 FastCast.__type = "FastCast" -- For compatibility with TypeMarshaller
 

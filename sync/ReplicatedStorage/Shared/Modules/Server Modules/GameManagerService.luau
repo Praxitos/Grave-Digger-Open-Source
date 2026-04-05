@@ -33,6 +33,15 @@ local points_folder   = main_game.Points
 local spawn_anims  = shared:WaitForChild("Assets"):WaitForChild("Animations"):WaitForChild("Character"):WaitForChild("Spawns")
 local core_maps    = shared.Assets.Maps["Core Maps"]
 
+-- Points billboard
+local ui_folder = shared.Assets.UI
+local points_billboard = ui_folder.Points_Billboard
+
+
+local testing_boolean = config.Parent.Game_Variables.Testing_Boolean
+local visualize_casts_boolean = config.Parent.Ranged_Variables.Visualizations.Visualize_Casts
+local fastcast_module = require(shared.Library.Externals.FastCast)
+
 -- State
 local time_tick = false
 
@@ -176,6 +185,10 @@ end
 
 
 -- Capture points
+local function set_billboard_ui(point_parent: Part)
+	local billboard_ui_clone = points_billboard:Clone()
+	billboard_ui_clone.Parent = point_parent
+end
 
 local function select_random_map(): Model
 	local maps = core_maps:GetChildren()
@@ -203,7 +216,9 @@ local function setup_capture_point(point: Instance, model: Model)
 		warn("[GameManager] Missing point data folder for:", point.Name)
 		return
 	end
-
+	
+	set_billboard_ui(point)
+	
 	local empire_count  = point_data:FindFirstChild(point.Name .. "_Empire_Count")
 	local nation_count  = point_data:FindFirstChild(point.Name .. "_Nation_Count")
 	local progress      = point_data:FindFirstChild(point.Name .. "_Progress")
@@ -213,6 +228,7 @@ local function setup_capture_point(point: Instance, model: Model)
 		warn("[GameManager] Missing value objects in point data:", point_data.Name)
 		return
 	end
+
 
 	print("[GameManager] Initialising point:", point.Name)
 
@@ -317,6 +333,16 @@ end
 
 function module.start_module()
 	print("[GameManager] Running initial startup!")
+	
+	fastcast_module.VisualizeCasts = visualize_casts_boolean.Value
+	
+	visualize_casts_boolean:GetPropertyChangedSignal("Value"):Connect(function()
+		fastcast_module.VisualizeCasts = visualize_casts_boolean.Value
+		print("[GameManager] Cast visualization set to", visualize_casts_boolean.Value)
+	end)
+	
+	
+	if testing_boolean.Value == true then return end
 
 	time_tick = true
 	task.spawn(begin_time)

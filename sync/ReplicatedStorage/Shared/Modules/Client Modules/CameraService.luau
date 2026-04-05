@@ -26,11 +26,6 @@ local Cameras_Stack = {}
 
 local function get_top_camera()
 	local top = Cameras_Stack[#Cameras_Stack]
-	if top then
-		print("[CAMERASERVICE::] Top camera is: ", top.name)
-	else
-		print("[CAMERASERVICE::] Cameras stack is empty.")
-	end
 	return top
 end
 
@@ -205,11 +200,8 @@ end
 -- recoil passthrough
 function module.apply_recoil(vertical, horizontal)
 	local current_camera = get_top_camera()
-	if current_camera and current_camera.name ~= "BaseCamera" then
-		print("[CAMERASERVICE::] Applying recoil to camera: ", current_camera.name, " vertical: ", vertical, " horizontal: ", horizontal)
+	if current_camera then
 		current_camera:ApplyRecoil(vertical, horizontal)
-	else
-		print("[CAMERASERVICE::] No applicable camera for recoil or camera is BaseCamera.")
 	end
 end
 
