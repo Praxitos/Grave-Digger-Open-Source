@@ -296,10 +296,6 @@ function BaseTool:ammo_check()
 	self.RegisteredAnimations.Hold:Play()
 end
 
--- // Shoulder Tracking (shared by all armed tools)
---
--- Call _initShoulderTracking() from your constructor.
--- Override _onShoulderChanged() in your subclass to swap aim anims.
 
 function BaseTool:_initShoulderTracking()
 	if not RunService:IsClient() then return end
@@ -322,8 +318,6 @@ function BaseTool:_initShoulderTracking()
 	end)
 end
 
--- Disconnects the shoulder attribute watcher. Call on unequip so the signal
--- does not fire and try to swap aim anims on an unequipped tool.
 function BaseTool:_stopShoulderTracking()
 	if self._shoulderChangedConn then
 		self._shoulderChangedConn:Disconnect()
@@ -331,10 +325,6 @@ function BaseTool:_stopShoulderTracking()
 	end
 end
 
--- // Aim Tracking (shared by all shoulder-aimed tools)
-
--- Starts per-frame shoulder pitch tracking.
--- Re-entrant safe: a second call while already tracking is a no-op.
 function BaseTool:_startAimTracking()
 	if self._aimConnection then return end -- already running
 
@@ -373,6 +363,54 @@ function BaseTool:_startAimTracking()
 	end)
 end
 
+function BaseTool:_onBulletHit(cast: any, result: RaycastResult, velocity: Vector3)
+	-- Surface VFX
+	if result.Material == Enum.Material.Wood then
+		self:emit_effect(
+			FX_WOOD_CHIPS,
+			CFrame.new(result.Position, result.Position + result.Normal),
+			{ "woodchip1", "woodchip2", "woodchip3" },
+			result.Instance,
+			20,
+			false
+		)
+	end
+
+	if cast.UserData.Penetrated then return end
+
+	-- Range check: no penetration beyond PENETRATION_RANGE studs
+	local muzzle = self.actual_model and self.actual_model.PrinceRifle_Muzzle
+	if not muzzle or (muzzle.Position - result.Position).Magnitude > PENETRATION_RANGE then
+		cast.UserData.Penetrated = true
+		return
+	end
+
+	local direction = cast.UserData.Direction :: Vector3
+
+	-- Entry decal
+	self:bullet_hole(result.Position, result.Normal)
+
+	-- Trace the exit point from the far side back toward entry
+	local exitParams = RaycastParams.new()
+	exitParams.FilterType = Enum.RaycastFilterType.Include
+	exitParams.FilterDescendantsInstances = { result.Instance }
+
+	local exitResult = workspace:Raycast(result.Position + direction * 100, -direction * 100, exitParams)
+	if exitResult then
+		self:bullet_hole(exitResult.Position, exitResult.Normal)
+	end
+
+	-- Continue cast through geometry
+	cast.UserData.Penetrated = true
+	local continuation = self.Caster:Fire(
+		result.Position + direction * 0.2,
+		direction,
+		velocity.Magnitude,
+		self.CasterBehavior
+	)
+	continuation.UserData.Direction  = direction
+	continuation.UserData.Penetrated = true
+end
 -- Stops tracking and snaps shoulders back to their resting poses.
 function BaseTool:_stopAimTracking()
 	if self._aimConnection then
