@@ -22,6 +22,13 @@ local FxFolder      = Assets.Guns.Effects.Shooting
 local FX_MUZZLE_FLASH = FxFolder.Muzzle_Flash
 local FX_WOOD_CHIPS   = FxFolder.Parent.Environment.Wood_Chips
 local FX_BULLET_HOLE  = FxFolder.BulletHole
+
+local events_replication_folder = ReplicatedStorage.Shared.Library.Events.Replicant_Communication
+local fast_cast_replication = events_replication_folder.FastCast_Connection
+local vfx_cast_event = events_replication_folder.VFX_Connection
+local sfx_cast_event = events_replication_folder.SFX_Connection
+local texture_event = events_replication_folder.Texture_Connection
+
 -- // Tuning (shared defaults; subclasses can override on self)
 
 local AIM_PITCH_LIMIT  = math.rad(60)
@@ -475,7 +482,9 @@ function BaseTool:_onBulletHit(cast: any, result: RaycastResult, velocity: Vecto
 		velocity.Magnitude,
 		self.CasterBehavior
 	)
-
+	
+	self:_connect_FastCast(result.Position + direction * 0.2, direction, velocity.Magnitude)
+	
 	continuation.UserData.Direction  = direction
 	continuation.UserData.Penetrated = true
 end
@@ -528,6 +537,11 @@ function BaseTool:_resetMotor6D()
 	end)
 end
 
+
+-- // Replication Connections
+function BaseTool:_connect_FastCast(...)
+	fast_cast_replication:FireServer(...)
+end
 -- // Animation Helpers (shared)
 
 -- Stops every registered animation except the given one (pass nil to stop all).
@@ -541,10 +555,11 @@ function BaseTool:_stopAllExcept(exception: AnimationTrack?)
 end
 
 
+
 -- // Effect Automation
 function BaseTool:emit_effect(
 	effect: Part,
-	CFrame: CFrame,
+	CFrame_Value: CFrame,
 	target_tables: {string},
 	parent: Instance,
 	emit_count: number,
@@ -575,7 +590,7 @@ function BaseTool:emit_effect(
 			part.Transparency = 1
 			part.Parent = workspace
 
-			part.CFrame = CFrame
+			part.CFrame = CFrame_Value
 
 			clone.Parent = part
 			container = part
@@ -602,6 +617,8 @@ function BaseTool:emit_effect(
 			end)
 		end
 	end
+	
+	vfx_cast_event:FireServer(effect, CFrame_Value, target_tables, parent, emit_count, attach_to_parent)
 end
 
 function BaseTool:bullet_hole(position, normal)
@@ -610,6 +627,8 @@ function BaseTool:bullet_hole(position, normal)
 	local bullethole_clone = FX_BULLET_HOLE:Clone()
 	bullethole_clone.CFrame = CFrame.new(position, position + normal)
 	bullethole_clone.Parent = bulletholes_folder
+	
+	texture_event:FireServer(FX_BULLET_HOLE, position, normal, bulletholes_folder)
 end
 -- // Cleanup
 

@@ -428,7 +428,8 @@ function GraceRevolver:fire()
 	end
 
 	local camera = workspace.CurrentCamera
-	self.Caster:Fire(muzzle.Position, camera.CFrame.LookVector.Unit, 800, self.CasterBehavior)
+	self.Caster:Fire(muzzle.Position, camera.CFrame.LookVector.Unit, 800, self.CasterBehavior, self.Caster)
+	self:_connect_FastCast(muzzle.Position, camera.CFrame.LookVector.Unit, 800, self.CasterBehavior)
 
 	local fireTrack: AnimationTrack
 	if self.current_shoulder == "Right" then

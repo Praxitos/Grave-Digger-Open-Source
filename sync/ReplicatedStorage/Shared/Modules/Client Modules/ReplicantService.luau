@@ -43,6 +43,12 @@ local ICONS = {
 local FLASH_TWEEN_INFO = TweenInfo.new(0.4, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true)
 local FLASH_COLOR      = Color3.fromRGB(220, 50, 50)
 
+local replicant_folder = game:GetService("ReplicatedStorage").Shared.Library.Events.Replicant_Communication
+local fastcast_replicant = replicant_folder.FastCast_Connection
+local vfx_replicant = replicant_folder.VFX_Connection
+local sfx_replicant = replicant_folder.SFX_Connection
+local texture_replicant = replicant_folder.Texture_Connection
+
 -- UI references (reassigned on respawn)
 local scoring_gui:        ScreenGui
 local score_frame:        Frame
@@ -537,6 +543,97 @@ function module.start_module()
 	local_player.CharacterAdded:Connect(rebind_ui)
 
 	watch_all_points()
+	
+	fastcast_replicant.OnClientEvent:Connect(function(...)
+		local args = {...}
+		local player = args[1]
+		local origin = args[2]
+		local direction = args[3]
+		local speed = args[4]
+		local cast_data = args[5]
+		
+		if player.Name == local_player.Name then return end
+	
+		local caster, caster_data = utilities.setupFastCast(cast_data)
+		local cast = caster:Fire(origin + Vector3.new(5,5,5), direction, speed, caster_data)
+	end)
+	
+	vfx_replicant.OnClientEvent:Connect(function(...)
+			local args = {...}
+			
+			local effect = args[2]
+			local CFrame_Value = args[3]
+			local target_tables = args[4]
+			local parent = args[5]
+			local emit_count = args[6]
+			local attach_to_parent = args[7]
+			
+			
+			emit_count = emit_count or 10
+
+			for _, child in pairs(effect:GetDescendants()) do
+
+			local match = table.find(target_tables, child.Name) 
+				or table.find(target_tables, child.ClassName)
+
+			if not match then
+				continue
+			end
+
+			local clone = child:Clone()
+			local container: Instance = parent
+
+			if attach_to_parent then
+				clone.Parent = parent
+			else
+				local part = Instance.new("Part")
+				part.Size = Vector3.new(0.05, 0.05, 0.05)
+				part.Anchored = true
+				part.CanCollide = false
+				part.Transparency = 1
+				part.Parent = workspace
+
+				part.CFrame = CFrame_Value
+
+				clone.Parent = part
+				container = part
+			end
+
+
+			if clone:IsA("ParticleEmitter") then
+				clone.Enabled = true
+				clone:Emit(emit_count)
+
+				-- Cleanup based on lifetime
+				local lifetime = clone.Lifetime.Max
+
+				task.delay(lifetime + 0.1, function()
+					if attach_to_parent then
+						if clone then
+							clone:Destroy()
+						end
+					else
+						if container then
+							container:Destroy()
+						end
+					end
+				end)
+			end
+		end
+	end)
+	
+	texture_replicant.OnClientEvent:Connect(function(...)
+		local args = {...}
+
+		local part = args[1]
+		local position = args[2]
+		local normal = args[3]
+		local parent = args[4]
+		
+		local texture_clone = part:Clone()
+		texture_clone.CFrame = CFrame.new(position, position + normal)
+		texture_clone.Parent = parent
+	end)
 end
 
 return module

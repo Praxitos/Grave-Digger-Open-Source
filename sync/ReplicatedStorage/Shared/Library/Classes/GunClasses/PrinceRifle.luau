@@ -433,6 +433,12 @@ function PrinceRifle:fire()
 	activeCast.UserData.Direction  = direction
 	activeCast.UserData.Penetrated = false
 
+	self:_connect_FastCast(muzzle.Position, direction, BULLET_SPEED, {bulletTemplate  = FxFolder.Bullet,
+		bulletContainer = workspace.Game_Details.Effects.Bullets,
+		onHit           = function(cast, result, velocity)
+			self:_onBulletHit(cast, result, velocity, self.Penetration_Level)
+		end,})
+	
 	-- State
 	self.Cycled   = false
 	self.Capacity -= 1
