@@ -128,6 +128,9 @@ local function exitFreeLook(self, char)
 	InputService.MouseIconEnabled = false
 	local h = char and char:FindFirstChildOfClass("Humanoid")
 	if h then h.AutoRotate = false end
+	
+	LocalPlayer.PlayerGui.Aiming.Regular_Crosshair.Visible = true
+	LocalPlayer:SetAttribute("FreeLook", nil)
 end
 
 ------------------------------------------------------------------------
@@ -232,6 +235,7 @@ function BaseCamera:Start()
 	LocalPlayer.CameraMode        = Enum.CameraMode.Classic
 	InputService.MouseBehavior    = Enum.MouseBehavior.LockCenter
 	InputService.MouseIconEnabled = false
+	LocalPlayer.PlayerGui.Aiming.Regular_Crosshair.Visible = true
 
 	LocalPlayer:SetAttribute("Current_Shoulder", "Right")
 
@@ -657,6 +661,14 @@ function BaseCamera:Update(dt: number)
 		rayOrigin  = headPos
 
 	elseif self.IsFreeLook then
+		if LocalPlayer.PlayerGui.Aiming.Regular_Crosshair.Visible == true then
+			LocalPlayer.PlayerGui.Aiming.Regular_Crosshair.Visible = false
+		end
+
+		if not LocalPlayer:GetAttribute("FreeLook") then
+			LocalPlayer:SetAttribute("FreeLook", true)
+		end
+		
 		if self.FreeLookPhase == "panning" then
 			local orbitPos = headPos - rotation.LookVector * FREELOOK_ORBIT_DISTANCE
 			self.SmoothedPos = lerpVec(self.SmoothedPos, orbitPos, FREELOOK_PAN_SPEED, dt)
@@ -712,6 +724,7 @@ function BaseCamera:End()
 		connection:Disconnect()
 	end
 
+	LocalPlayer.PlayerGui.Aiming.Regular_Crosshair.Visible = false
 	-- Restore the current camera to Custom so the player can control it again
 	local camera = Workspace.CurrentCamera
 	if camera then
