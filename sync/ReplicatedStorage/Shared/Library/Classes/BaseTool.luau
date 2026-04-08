@@ -1,12 +1,12 @@
-
 --!native
 --!optimize 2
 
-local Players = game:GetService("Players")
+local Players           = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local RunService = game:GetService("RunService")
+local RunService        = game:GetService("RunService")
+local UserInputService  = game:GetService("UserInputService")
 
-local Types = require(script.Parent.Parent.Types)
+local Types            = require(script.Parent.Parent.Types)
 local utilities_module = require(
 	ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Library"):WaitForChild("Util")
 )
@@ -14,20 +14,17 @@ local utilities_module = require(
 local LOCAL_PLAYER = Players.LocalPlayer
 
 local Assets         = ReplicatedStorage.Shared.Assets
-local Holster_Folder = Assets.Guns.Holsters:FindFirstChild("Gun Holsters")
-local Tool_Folder    = Assets.Guns.ToolModels
-local Anim_Folder    = Assets.Animations.Tools.Guns.PrinceRifle
-local FxFolder      = Assets.Guns.Effects.Shooting
+local FxFolder       = Assets.Guns.Effects.Shooting
 
-local FX_MUZZLE_FLASH = FxFolder.Muzzle_Flash
-local FX_WOOD_CHIPS   = FxFolder.Parent.Environment.Wood_Chips
-local FX_BULLET_HOLE  = FxFolder.BulletHole
+local FX_BULLET_HOLE = FxFolder.BulletHole
+local FX_WOOD_CHIPS  = FxFolder.Parent.Environment.Wood_Chips
 
 local events_replication_folder = ReplicatedStorage.Shared.Library.Events.Replicant_Communication
-local fast_cast_replication = events_replication_folder.FastCast_Connection
-local vfx_cast_event = events_replication_folder.VFX_Connection
-local sfx_cast_event = events_replication_folder.SFX_Connection
-local texture_event = events_replication_folder.Texture_Connection
+local fast_cast_replication     = events_replication_folder.FastCast_Connection
+local hit_connection            = events_replication_folder.Hit_Connection
+local vfx_cast_event            = events_replication_folder.VFX_Connection
+local sfx_cast_event            = events_replication_folder.SFX_Connection
+local texture_event             = events_replication_folder.Texture_Connection
 
 -- // Tuning (shared defaults; subclasses can override on self)
 
@@ -36,31 +33,26 @@ local AIM_LERP_ALPHA   = 0.1
 local MOTOR_LERP_ALPHA = 0.15
 local MOTOR_SNAP_DIST  = 0.001
 
-local BaseTool = {}
-BaseTool.__index = BaseTool
+-- Hard-cut blend time. 0 = instant cuts.
+local CUT = 0
+
+--------------------------------------------------------------------------------
+-- Penetration profiles
+--------------------------------------------------------------------------------
 
 local Penetration_Profiles = {
-	[4] = {
-	["Stud_Limit"] = 4,
-	["Materials"] = {Enum.Material.Wood, Enum.Material.WoodPlanks},
-	["Distance_Limiter"] = 70,		
-	},
-	[3] = {
-	["Stud_Limit"] = 3,
-	["Materials"] = {Enum.Material.Wood, Enum.Material.WoodPlanks},
-	["Distance_Limiter"] = 50,	
-	},
-	[2] = {
-	["Stud_Limit"] = 2,
-	["Materials"] = {Enum.Material.Wood, Enum.Material.WoodPlanks},
-	["Distance_Limiter"] = 30,	
-	},
-	[1] = {
-	["Stud_Limit"] = 1,
-	["Materials"] = {},
-	["Distance_Limiter"] = 0,	
-	},
+	[4] = { Stud_Limit = 4, Materials = { Enum.Material.Wood, Enum.Material.WoodPlanks }, Distance_Limiter = 70 },
+	[3] = { Stud_Limit = 3, Materials = { Enum.Material.Wood, Enum.Material.WoodPlanks }, Distance_Limiter = 50 },
+	[2] = { Stud_Limit = 2, Materials = { Enum.Material.Wood, Enum.Material.WoodPlanks }, Distance_Limiter = 30 },
+	[1] = { Stud_Limit = 1, Materials = {},                                                Distance_Limiter = 0  },
 }
+
+--------------------------------------------------------------------------------
+-- BaseTool
+--------------------------------------------------------------------------------
+
+local BaseTool = {}
+BaseTool.__index = BaseTool
 
 export type BaseTool = typeof(setmetatable({} :: {
 	className: "BaseTool",
@@ -76,85 +68,106 @@ export type BaseTool = typeof(setmetatable({} :: {
 	actual_holster: Model?,
 
 	-- animations
-	animations: {[string]: Animation}?,
-	RegisteredAnimations: {[string]: AnimationTrack}?,
+	animations: { [string]: Animation }?,
+	RegisteredAnimations: { [string]: AnimationTrack }?,
+
+	-- animation layer table (subclass defines; BaseTool uses for _playAnim/_stopLayer)
+	ANIM_LAYERS: { [string]: number }?,
 
 	-- motor6d
 	motor_6d_data: {
 		Parent: string,
-		Part0: string,
-		Part1: string | BasePart,
-		C0: CFrame
+		Part0:  string,
+		Part1:  string | BasePart,
+		C0:     CFrame,
 	}?,
-	motor_6d: Motor6D?,
+	motor_6d:       Motor6D?,
 	_motorOriginal: { C0: CFrame, C1: CFrame, Part0: BasePart?, Part1: BasePart? }?,
 
-	-- shoulder / aim state (used by armed tools)
+	-- shoulder / aim state
 	current_shoulder: string,
-	Aiming: boolean,
-	_aimConnection: RBXScriptConnection?,
-	_leftShoulder: Motor6D?,
-	_rightShoulder: Motor6D?,
-	_leftShoulderC0: CFrame?,
+	Aiming:           boolean,
+	_aimVersion:      number,
+	_aimConnection:   RBXScriptConnection?,
+	_leftShoulder:    Motor6D?,
+	_rightShoulder:   Motor6D?,
+	_leftShoulderC0:  CFrame?,
 	_rightShoulderC0: CFrame?,
+
+	-- busy flags (subclass sets these; _isBusy reads them)
+	Firing:    boolean,
+	Reloading: boolean,
+	Cycling:   boolean,
+	Alting:    boolean,
+	Spinning:  boolean,
 
 	-- internal
 	_activationConnection: RBXScriptConnection?,
+	_inputBeganConn:       RBXScriptConnection?,
+	_inputEndedConn:       RBXScriptConnection?,
 	_shoulderChangedConn:  RBXScriptConnection?,
+	character_connection:  RBXScriptConnection?,
 }, {} :: typeof(BaseTool)))
 
--- // Constructor
+--------------------------------------------------------------------------------
+-- Constructor
+--------------------------------------------------------------------------------
 
 function BaseTool.new(BaseToolCreateInfo: Types.BaseToolCreateInfo): BaseTool
 	local self = setmetatable({}, BaseTool)
 
 	self.className = "BaseTool"
-	self.name = BaseToolCreateInfo.name
+	self.name      = BaseToolCreateInfo.name
 
-	self.tool = nil
-	self.actual_model = nil
+	self.tool           = nil
+	self.actual_model   = nil
 	self.actual_holster = nil
 	self.RegisteredAnimations = nil
 
+	-- Aim state
 	self.Aiming           = false
+	self._aimVersion      = 0
 	self.current_shoulder = "Right"
 
+	-- Busy flags (subclass overrides)
+	self.Firing    = false
+	self.Reloading = false
+	self.Cycling   = false
+	self.Alting    = false
+	self.Spinning  = false
+
+	-- Internal connections
 	self._activationConnection = nil
+	self._inputBeganConn       = nil
+	self._inputEndedConn       = nil
 	self._shoulderChangedConn  = nil
 	self._aimConnection        = nil
 
 	return self
 end
 
--- // Lifecycle: called when tool is given
+--------------------------------------------------------------------------------
+-- Lifecycle: on_give
+--------------------------------------------------------------------------------
 
 function BaseTool:on_give(tool: Tool, holster: Model?, model: Model?)
 	self.tool = tool
 
-	-- animations
 	if self.animations then
-		self.RegisteredAnimations = utilities_module.register_animations(
-			LOCAL_PLAYER,
-			self.animations
-		)
+		self.RegisteredAnimations = utilities_module.register_animations(LOCAL_PLAYER, self.animations)
 		if not self.RegisteredAnimations then
 			warn("[" .. self.className .. "] Failed to register animations")
 		end
 	end
 
-	-- holster resolution
 	if holster then
 		self.actual_holster = holster
 	elseif self.holster_reference then
-		self.actual_holster = utilities_module.reverse_search_holster(
-			LOCAL_PLAYER,
-			self.holster_reference.Name
-		)
+		self.actual_holster = utilities_module.reverse_search_holster(LOCAL_PLAYER, self.holster_reference.Name)
 	else
 		warn("[" .. self.className .. "] Missing holster_reference")
 	end
 
-	-- activation binding
 	if self._activationConnection then
 		self._activationConnection:Disconnect()
 	end
@@ -162,13 +175,14 @@ function BaseTool:on_give(tool: Tool, holster: Model?, model: Model?)
 		self:activate()
 	end)
 
-	-- optional subclass hook
 	if self._on_give then
 		self:_on_give(tool, holster, model)
 	end
 end
 
--- // Equip / Unequip
+--------------------------------------------------------------------------------
+-- Equip / Unequip
+--------------------------------------------------------------------------------
 
 function BaseTool:equip()
 	if not self.tool then return end
@@ -189,37 +203,30 @@ function BaseTool:equip()
 	end
 
 	if self.model_reference then
-		self.actual_model = utilities_module.reverse_search_model(
-			LOCAL_PLAYER,
-			self.model_reference.Name
-		)
+		self.actual_model = utilities_module.reverse_search_model(LOCAL_PLAYER, self.model_reference.Name)
 		if not self.actual_model then
 			warn("[" .. self.className .. "] Failed to find model")
 		end
 	end
 
-
-	LOCAL_PLAYER.Character:GetAttributeChangedSignal("Sprinting"):Connect(function()
-		if LOCAL_PLAYER.Character:GetAttribute("Sprinting") == true then
+	character:GetAttributeChangedSignal("Sprinting"):Connect(function()
+		if character:GetAttribute("Sprinting") == true then
 			task.wait(1)
 			self:_stopAllExcept()
-			print("Stopping all anims for the sprint...")
 		else
-			print("Sprinting is false, not stopping anims")
 			if self.Aiming then
-				if self.current_shoulder == "Right" then
-					self.RegisteredAnimations.Aim:Play()
-					return
-				else
-					self.RegisteredAnimations.Aim_Left:Play()
-					return
+				local aimTrack = self:_aimTrack()
+				if aimTrack and not aimTrack.IsPlaying then
+					aimTrack:Play()
 				end
+				return
 			end
-
-			self.RegisteredAnimations.Hold:Play()
+			if self.RegisteredAnimations and self.RegisteredAnimations.Hold then
+				self.RegisteredAnimations.Hold:Play()
+			end
 		end
 	end)
-	
+
 	if self._on_equip then
 		self:_on_equip()
 	end
@@ -234,23 +241,18 @@ function BaseTool:unequip()
 	local humanoid = character:FindFirstChildOfClass("Humanoid")
 	if not humanoid then return end
 
-	-- 1. Let the subclass cancel in-flight coroutines and disconnect input FIRST,
-	--    while animations are still alive so any Stopped:Wait() can resolve.
 	if self._on_unequip then
 		self:_on_unequip()
 	end
 
-	-- 2. Now it is safe to stop all animations — no coroutine is waiting on them.
 	if self.RegisteredAnimations then
 		for _, anim in pairs(self.RegisteredAnimations) do
 			anim:Stop()
 		end
 	end
 
-	-- 3. Unequip the tool from the humanoid.
 	humanoid:UnequipTools()
 
-	-- 4. Play the unequip animation if present.
 	if self.RegisteredAnimations and self.RegisteredAnimations.Unequip then
 		self.RegisteredAnimations.Unequip:Play()
 		if self.unequip_wait == true then
@@ -261,91 +263,284 @@ function BaseTool:unequip()
 	self.actual_model = nil
 end
 
--- // Shared Helpers
+--------------------------------------------------------------------------------
+-- Shared: state helpers
+--------------------------------------------------------------------------------
 
-function BaseTool:activate()
-	error(self.className .. " missing activate()")
+-- Returns true if any exclusive action is running.
+-- Subclasses can override to include custom flags.
+function BaseTool:_isBusy(): boolean
+	return self.Firing or self.Reloading or self.Cycling or self.Alting or self.Spinning
 end
 
-function BaseTool:_if_sprinting()
-	return LOCAL_PLAYER.Character:GetAttribute("Sprinting")
+function BaseTool:_if_sprinting(): boolean
+	local char = LOCAL_PLAYER.Character
+	return char ~= nil and char:GetAttribute("Sprinting") == true
 end
 
-function BaseTool:notify(text: string)
-	local Notifications_util = require(
-		LOCAL_PLAYER.PlayerGui:WaitForChild("Notifications"):WaitForChild("Utils")
-	)
-	Notifications_util.send_notification(LOCAL_PLAYER, text)
-end
+--------------------------------------------------------------------------------
+-- Shared: animation helpers
+--------------------------------------------------------------------------------
 
-function BaseTool:ammo_check()
-	if not self.RegisteredAnimations or not self.RegisteredAnimations.Check then
-		print("Has no check animation, assuming there is no built in check system...")
-		return
+-- Stops every registered track (except the optional exception) instantly.
+function BaseTool:_stopAllExcept(exception: AnimationTrack?)
+	if not self.RegisteredAnimations then return end
+	for _, track in pairs(self.RegisteredAnimations) do
+		if track ~= exception then
+			if track:IsA("AnimationTrack") and track.IsPlaying then
+				track:Stop(CUT)
+			end
+		end
 	end
-	
-	if self.Firing or self.Reloading or self.Cycling or self.Alting then return end
+end
 
-	local ammo_check_part
-	local ammo_check_utils
+-- Layer-aware animation player. Requires self.ANIM_LAYERS to be defined.
+-- Playing a layer-N track stops all other tracks at layer <= N (for N==max it stops all).
+-- Falls back to a simple track:Play() when ANIM_LAYERS is absent.
+function BaseTool:_playAnim(name: string): AnimationTrack
+	local anims = self.RegisteredAnimations
+	assert(anims, self.className .. ":_playAnim called before animations were registered")
 
-	if not workspace.CurrentCamera:FindFirstChild("Ammo_Check") then
-		ammo_check_part = game.ReplicatedStorage.Shared.Assets.Guns.Effects.AmmoUI.Ammo_Check:Clone()
-		ammo_check_part.Parent = workspace.CurrentCamera
-		ammo_check_utils = require(ammo_check_part.Utils)
-	else
-		ammo_check_part = workspace.CurrentCamera.Ammo_Check
-		ammo_check_utils = require(workspace.CurrentCamera.Ammo_Check.Utils)
-	end
+	local track = anims[name]
+	assert(track, self.className .. ": unknown animation '" .. tostring(name) .. "'")
 
-	self:_stopAllExcept()
-	
-	self.RegisteredAnimations.Check:Play()
-	self.RegisteredAnimations.Check.Stopped:Wait()
+	local layers = self.ANIM_LAYERS
+	if layers then
+		local myLayer = layers[name] or 0
+		local maxLayer = 0
+		for _, v in pairs(layers) do
+			if v > maxLayer then maxLayer = v end
+		end
 
-	local hrp = LOCAL_PLAYER.Character.HumanoidRootPart
-	ammo_check_part.Position = hrp.Position + hrp.CFrame.RightVector * 2 + Vector3.new(0, 1.5, 0)
-
-	local weld = Instance.new("WeldConstraint")
-	weld.Part0 = ammo_check_part
-	weld.Part1 = hrp
-	weld.Parent = ammo_check_part
-
-	local percentage = math.clamp(self.Capacity / self.Max_Capacity, 0, 1)
-	ammo_check_utils.utils(self.Ammo_Type, percentage, false)
-	
-	if self.Aiming then
-		if self.current_shoulder == "Right" then
-			self.RegisteredAnimations.Aim:Play()
-			return
-		else
-			self.RegisteredAnimations.Aim_Left:Play()
-			return
+		for trackName, layer in pairs(layers) do
+			local shouldStop = (myLayer >= maxLayer) and (layer <= myLayer) or (layer == myLayer)
+			if shouldStop then
+				local t = anims[trackName]
+				if t and t ~= track and t.IsPlaying then
+					t:Stop(CUT)
+				end
+			end
 		end
 	end
 
-	self.RegisteredAnimations.Hold:Play()
+	track:Play()
+	return track
 end
 
+-- Stops all registered tracks at or below the given layer number.
+function BaseTool:_stopLayer(maxLayer: number)
+	if not self.RegisteredAnimations then return end
+	local layers = self.ANIM_LAYERS
+	if not layers then
+		-- No layer table: stop everything
+		self:_stopAllExcept()
+		return
+	end
+	for trackName, layer in pairs(layers) do
+		if layer <= maxLayer then
+			local t = self.RegisteredAnimations[trackName]
+			if t and t.IsPlaying then
+				t:Stop(CUT)
+			end
+		end
+	end
+end
+
+-- Returns the correct aim AnimationTrack for the current shoulder, or nil.
+function BaseTool:_aimTrack(): AnimationTrack?
+	local anims = self.RegisteredAnimations
+	if not anims then return nil end
+	return (self.current_shoulder == "Right") and anims.Aim or anims.Aim_Left
+end
+
+-- Kills both aim tracks unconditionally.
+function BaseTool:_killAimTracks()
+	local anims = self.RegisteredAnimations
+	if not anims then return end
+	if anims.Aim      and anims.Aim.IsPlaying      then anims.Aim:Stop(CUT)      end
+	if anims.Aim_Left and anims.Aim_Left.IsPlaying then anims.Aim_Left:Stop(CUT) end
+end
+
+-- Restores the correct base pose (Hold or Aim) once no busy action is running.
+-- Subclasses can override for more complex layer logic.
+function BaseTool:_restoreBase()
+	if self:_isBusy() then return end
+	if not self.Equipped then return end
+
+	local anims = self.RegisteredAnimations
+	if not anims then return end
+
+	-- If the weapon uses ANIM_LAYERS, also bail if any layer >= 1 is still playing.
+	if self.ANIM_LAYERS then
+		for trackName, layer in pairs(self.ANIM_LAYERS) do
+			if layer >= 1 and anims[trackName] and anims[trackName].IsPlaying then
+				return
+			end
+		end
+	end
+
+	if self.Aiming then
+		local want = self:_aimTrack()
+		local kill = (want == anims.Aim) and anims.Aim_Left or anims.Aim
+		if kill and kill.IsPlaying    then kill:Stop(CUT) end
+		if anims.Hold and anims.Hold.IsPlaying then anims.Hold:Stop(CUT) end
+		if want and not want.IsPlaying then want:Play() end
+	else
+		self:_killAimTracks()
+		if anims.Hold and not anims.Hold.IsPlaying then
+			anims.Hold:Play()
+		end
+	end
+end
+
+function BaseTool:_restoreBaseDeferred()
+	task.defer(function()
+		self:_restoreBase()
+	end)
+end
+
+--------------------------------------------------------------------------------
+-- Shared: aim system (aimVersion prevents stuck-aim on rapid RMB tap)
+--------------------------------------------------------------------------------
+
+-- Called when the shoulder attribute changes. Base implementation swaps aim tracks.
+-- Subclasses may override (call or skip super as needed).
+function BaseTool:_onShoulderChanged()
+	if self:_isBusy() then return end
+	if not self.Aiming then return end
+
+	task.defer(function()
+		if self:_isBusy() or not self.Aiming then return end
+		self:_restoreBase()
+	end)
+end
+
+function BaseTool:aim()
+	if self:_if_sprinting() then return end
+	if self.Aiming or self:_isBusy() then return end
+
+	self.Aiming = true
+	self._aimVersion += 1
+	self:_startAimTracking()
+
+	local anims = self.RegisteredAnimations
+	if not anims then return end
+
+	self:_killAimTracks()
+	if anims.Hold and anims.Hold.IsPlaying then anims.Hold:Stop(CUT) end
+
+	local aimTrack = self:_aimTrack()
+	if aimTrack then aimTrack:Play() end
+
+	local char = LOCAL_PLAYER.Character
+	if char then char:SetAttribute("Aiming", true) end
+
+	self:_enable_aiming_ui(self.Aiming_Number or 50)
+end
+
+function BaseTool:endAiming()
+	if not self.Aiming then return end
+
+	self.Aiming = false
+	self._aimVersion += 1
+	self:_stopAimTracking()
+
+	local anims = self.RegisteredAnimations
+	if anims then
+		self:_killAimTracks()
+		if not self:_isBusy() then
+			if anims.Hold and not anims.Hold.IsPlaying then
+				anims.Hold:Play()
+			end
+		end
+	end
+
+	local char = LOCAL_PLAYER.Character
+	if char then char:SetAttribute("Aiming", nil) end
+
+	self:_disable_aiming_ui()
+end
+
+--------------------------------------------------------------------------------
+-- Shared: input system
+-- Subclasses define _getKeyBindings() returning a table of action->KeyCode/input.
+-- Default bindings cover RMB=aim, R=reload, T=ammo_check.
+-- Override _getKeyBindings in the subclass to add/replace bindings.
+--------------------------------------------------------------------------------
+
+-- Default bindings. Subclass can override _getKeyBindings() to extend/replace.
+function BaseTool:_getKeyBindings(): { [string]: Enum.KeyCode | Enum.UserInputType }
+	return {
+		Aim    = Enum.UserInputType.MouseButton2,
+		Reload = Enum.KeyCode.R,
+		Check  = Enum.KeyCode.T,
+	}
+end
+
+function BaseTool:_connectInput()
+	local bindings = self:_getKeyBindings()
+
+	self._inputBeganConn = UserInputService.InputBegan:Connect(function(input, processed)
+		if processed then return end
+
+		for action, bind in pairs(bindings) do
+			local matched = (typeof(bind) == "EnumItem" and bind.EnumType == Enum.UserInputType)
+				and input.UserInputType == bind
+				or (typeof(bind) == "EnumItem" and bind.EnumType == Enum.KeyCode)
+				and input.KeyCode == bind
+
+			if matched then
+				if action == "Aim" then
+					self:aim()
+				elseif action == "Reload" then
+					self:reload()
+				elseif action == "Check" then
+					self:ammo_check()
+				elseif self[action] and type(self[action]) == "function" then
+					self[action](self)
+				end
+			end
+		end
+	end)
+
+	self._inputEndedConn = UserInputService.InputEnded:Connect(function(input, processed)
+		if processed then return end
+		local aimBind = bindings.Aim
+		local matched = aimBind
+			and ((typeof(aimBind) == "EnumItem" and aimBind.EnumType == Enum.UserInputType and input.UserInputType == aimBind)
+				or (typeof(aimBind) == "EnumItem" and aimBind.EnumType == Enum.KeyCode and input.KeyCode == aimBind))
+		if matched then
+			self:endAiming()
+		end
+	end)
+end
+
+function BaseTool:_disconnectInput()
+	if self._inputBeganConn then
+		self._inputBeganConn:Disconnect()
+		self._inputBeganConn = nil
+	end
+	if self._inputEndedConn then
+		self._inputEndedConn:Disconnect()
+		self._inputEndedConn = nil
+	end
+end
+
+--------------------------------------------------------------------------------
+-- Shared: shoulder tracking
+--------------------------------------------------------------------------------
 
 function BaseTool:_initShoulderTracking()
 	if not RunService:IsClient() then return end
-	local player = Players.LocalPlayer
-	self.current_shoulder = player:GetAttribute("Current_Shoulder") or "Right"
+	self.current_shoulder = LOCAL_PLAYER:GetAttribute("Current_Shoulder") or "Right"
 
 	if self._shoulderChangedConn then
 		self._shoulderChangedConn:Disconnect()
 	end
 
-	self._shoulderChangedConn = player:GetAttributeChangedSignal("Current_Shoulder"):Connect(function()
-		self.current_shoulder = player:GetAttribute("Current_Shoulder") or "Right"
-		-- DO NOT re-cache _leftShoulderC0/_rightShoulderC0 here.
-		-- Those are set once when aim starts (_startAimTracking) from the resting pose.
-		-- Re-caching during a swap reads the live motor C0 which is already offset
-		-- by the aim lerp — using that as the new origin causes compounding upward drift.
-		if self._onShoulderChanged then
-			self:_onShoulderChanged()
-		end
+	self._shoulderChangedConn = LOCAL_PLAYER:GetAttributeChangedSignal("Current_Shoulder"):Connect(function()
+		self.current_shoulder = LOCAL_PLAYER:GetAttribute("Current_Shoulder") or "Right"
+		self:_onShoulderChanged()
 	end)
 end
 
@@ -356,8 +551,12 @@ function BaseTool:_stopShoulderTracking()
 	end
 end
 
+--------------------------------------------------------------------------------
+-- Shared: aim motor tracking (PreSimulation lerp for pitch)
+--------------------------------------------------------------------------------
+
 function BaseTool:_startAimTracking()
-	if self._aimConnection then return end -- already running
+	if self._aimConnection then return end
 
 	local character = LOCAL_PLAYER.Character
 	if not character then return end
@@ -371,7 +570,6 @@ function BaseTool:_startAimTracking()
 
 	self._leftShoulder    = leftShoulder
 	self._rightShoulder   = rightShoulder
-	-- cache the current (resting) C0 — the animation system owns these values
 	self._leftShoulderC0  = leftShoulder.C0
 	self._rightShoulderC0 = rightShoulder.C0
 
@@ -380,8 +578,6 @@ function BaseTool:_startAimTracking()
 
 	self._aimConnection = RunService.PreSimulation:Connect(function()
 		if not self.Aiming then return end
-		-- always lerp from the motor's *current* value toward (restC0 * pitchOffset)
-		-- this means shoulder-swap re-caches are immediately respected
 		local pitch    = workspace.CurrentCamera.CFrame:ToEulerAnglesYXZ()
 		local aimAngle = math.clamp(pitch, -pitchLimit, pitchLimit)
 
@@ -394,120 +590,22 @@ function BaseTool:_startAimTracking()
 	end)
 end
 
-function BaseTool:_onBulletHit(cast: any, result: RaycastResult, velocity: Vector3, muzzle: Part, Penetration_Level: number)
-	local profile = Penetration_Profiles[Penetration_Level] -- or however you select this dynamically
-	if not profile then return end
-
-	local instance = result.Instance
-	local material = result.Material
-	local direction = cast.UserData.Direction :: Vector3
-
-	-- Prevent double-penetration
-	if cast.UserData.Penetrated then return end
-
-	if not muzzle then return end
-
-	local distanceFromMuzzle = (muzzle.Position - result.Position).Magnitude
-	if distanceFromMuzzle > profile.Distance_Limiter then
-		cast.UserData.Penetrated = true
-		return
-	end
-
-	-- Material check
-	local canPenetrateMaterial = false
-	for _, mat in ipairs(profile.Materials) do
-		if mat == material then
-			canPenetrateMaterial = true
-			break
-		end
-	end
-
-	if not canPenetrateMaterial then
-		cast.UserData.Penetrated = true
-		return
-	end
-
-	-- Entry effects (always happens on hit)
-	self:bullet_hole(result.Position, result.Normal)
-
-	if material == Enum.Material.Wood then
-		self:emit_effect(
-			FX_WOOD_CHIPS,
-			CFrame.new(result.Position, result.Position + result.Normal),
-			{ "woodchip1", "woodchip2", "woodchip3" },
-			instance,
-			20,
-			false
-		)
-	end
-
-	-- Thickness check (forward ray through object)
-	local thicknessParams = RaycastParams.new()
-	thicknessParams.FilterType = Enum.RaycastFilterType.Include
-	thicknessParams.FilterDescendantsInstances = { instance }
-
-	local thicknessResult = workspace:Raycast(
-		result.Position + direction * 0.05,
-		direction * profile.Stud_Limit,
-		thicknessParams
-	)
-
-	-- If we DIDN'T exit the object within Stud_Limit → too thick
-	if thicknessResult then
-		cast.UserData.Penetrated = true
-		return
-	end
-
-	-- Find exit point (reverse trace like you had, but bounded)
-	local exitParams = RaycastParams.new()
-	exitParams.FilterType = Enum.RaycastFilterType.Include
-	exitParams.FilterDescendantsInstances = { instance }
-
-	local exitResult = workspace:Raycast(
-		result.Position + direction * profile.Stud_Limit,
-		-direction * profile.Stud_Limit,
-		exitParams
-	)
-
-	if exitResult then
-		self:bullet_hole(exitResult.Position, exitResult.Normal)
-	end
-
-	-- Continue bullet
-	cast.UserData.Penetrated = true
-
-	local continuation = self.Caster:Fire(
-		result.Position + direction * 0.2,
-		direction,
-		velocity.Magnitude,
-		self.CasterBehavior
-	)
-	
-	self:_connect_FastCast(result.Position + direction * 0.2, direction, velocity.Magnitude)
-	
-	continuation.UserData.Direction  = direction
-	continuation.UserData.Penetrated = true
-end
--- Stops tracking and snaps shoulders back to their resting poses.
 function BaseTool:_stopAimTracking()
 	if self._aimConnection then
 		self._aimConnection:Disconnect()
 		self._aimConnection = nil
 	end
-	-- snap back cleanly; guard in case they were never set
-	if self._leftShoulder and self._leftShoulderC0 then
-		self._leftShoulder.C0 = self._leftShoulderC0
-	end
-	if self._rightShoulder and self._rightShoulderC0 then
-		self._rightShoulder.C0 = self._rightShoulderC0
-	end
+	if self._leftShoulder  and self._leftShoulderC0  then self._leftShoulder.C0  = self._leftShoulderC0  end
+	if self._rightShoulder and self._rightShoulderC0 then self._rightShoulder.C0 = self._rightShoulderC0 end
 	self._leftShoulder    = nil
 	self._rightShoulder   = nil
 	self._leftShoulderC0  = nil
 	self._rightShoulderC0 = nil
 end
 
--- // Motor6D Helpers (shared by armed tools that weld a model to an arm)
+--------------------------------------------------------------------------------
+-- Shared: Motor6D helpers
+--------------------------------------------------------------------------------
 
 function BaseTool:_cacheMotor6D()
 	if not self.motor_6d then return end
@@ -519,7 +617,6 @@ function BaseTool:_cacheMotor6D()
 	}
 end
 
--- Lerps the motor back to its cached transform, then disconnects.
 function BaseTool:_resetMotor6D()
 	if not self.motor_6d or not self._motorOriginal then return end
 	local motor    = self.motor_6d
@@ -537,106 +634,287 @@ function BaseTool:_resetMotor6D()
 	end)
 end
 
+--------------------------------------------------------------------------------
+-- Shared: projectile hit & penetration
+--------------------------------------------------------------------------------
 
--- // Replication Connections
+function BaseTool:_onBulletHit(
+	cast:             any,
+	result:           RaycastResult,
+	velocity:         Vector3,
+	muzzle:           Part,
+	Penetration_Level: number,
+	damage:           number,
+	knockback_force:  number
+)
+	local profile = Penetration_Profiles[Penetration_Level]
+	if not profile then return end
+
+	local instance  = result.Instance
+	local material  = result.Material
+	local direction = cast.UserData.Direction :: Vector3
+
+	if cast.UserData.Penetrated then return end
+	if not muzzle then return end
+
+	if (muzzle.Position - result.Position).Magnitude > profile.Distance_Limiter then
+		cast.UserData.Penetrated = true
+		return
+	end
+
+	local canPenetrate = false
+	for _, mat in ipairs(profile.Materials) do
+		if mat == material then canPenetrate = true; break end
+	end
+
+	self:_applyHit(result, damage, direction, knockback_force)
+
+	if not canPenetrate then
+		cast.UserData.Penetrated = true
+		return
+	end
+
+	-- Entry effects
+	self:bullet_hole(result.Position, result.Normal)
+
+	if material == Enum.Material.Wood then
+		self:emit_effect(
+			FX_WOOD_CHIPS,
+			CFrame.new(result.Position, result.Position + result.Normal),
+			{ "woodchip1", "woodchip2", "woodchip3" },
+			instance,
+			20,
+			false
+		)
+	end
+
+	-- Thickness check
+	local thicknessParams = RaycastParams.new()
+	thicknessParams.FilterType = Enum.RaycastFilterType.Include
+	thicknessParams.FilterDescendantsInstances = { instance }
+
+	local thicknessResult = workspace:Raycast(result.Position + direction * 0.05, direction * profile.Stud_Limit, thicknessParams)
+	if thicknessResult then
+		cast.UserData.Penetrated = true
+		return
+	end
+
+	-- Exit hole
+	local exitParams = RaycastParams.new()
+	exitParams.FilterType = Enum.RaycastFilterType.Include
+	exitParams.FilterDescendantsInstances = { instance }
+
+	local exitResult = workspace:Raycast(result.Position + direction * profile.Stud_Limit, -direction * profile.Stud_Limit, exitParams)
+	if exitResult then
+		self:bullet_hole(exitResult.Position, exitResult.Normal)
+	end
+
+	-- Continue bullet (penetration continuation)
+	cast.UserData.Penetrated = true
+
+	local newOrigin    = result.Position + direction * 0.2
+	local continuation = self.Caster:Fire(newOrigin, direction, velocity.Magnitude, self.CasterBehavior)
+	self:_connect_FastCast(newOrigin, direction, velocity.Magnitude)
+	continuation.UserData.Direction  = direction
+	continuation.UserData.Penetrated = true
+end
+
+function BaseTool:_applyHit(result: RaycastResult, damage: number, direction: Vector3, knockback_force: number)
+	if not result then return end
+	hit_connection:FireServer({
+		Position  = result.Position,
+		Normal    = result.Normal,
+		Instance  = result.Instance,
+		Material  = result.Material,
+		Direction = direction,
+	}, damage, knockback_force)
+end
+
+--------------------------------------------------------------------------------
+-- Shared: replication
+--------------------------------------------------------------------------------
+
 function BaseTool:_connect_FastCast(...)
 	fast_cast_replication:FireServer(...)
 end
--- // Animation Helpers (shared)
 
--- Stops every registered animation except the given one (pass nil to stop all).
-function BaseTool:_stopAllExcept(exception: AnimationTrack?)
-	if not self.RegisteredAnimations then return end
-	for _, track in pairs(self.RegisteredAnimations) do
-		if track ~= exception then
-			track:Stop()
-		end
+--------------------------------------------------------------------------------
+-- Shared: aiming UI
+--------------------------------------------------------------------------------
+
+function BaseTool:_enable_aiming_ui(max_aiming: number)
+	local aiming_gui = LOCAL_PLAYER.PlayerGui.Aiming
+	aiming_gui.Regular_Crosshair.Visible = false
+	aiming_gui.Scoped_In.Visible = true
+
+	local scoped = aiming_gui.Scoped_In.main
+	local down   = scoped.down
+	local left   = scoped.left
+	local right  = scoped.right
+	local up     = scoped.up
+
+	local character = LOCAL_PLAYER.Character or LOCAL_PLAYER.CharacterAdded:Wait()
+	local root      = character:WaitForChild("HumanoidRootPart")
+	local humanoid  = character:WaitForChild("Humanoid")
+
+	if self.character_connection then
+		self.character_connection:Disconnect()
+	end
+
+	local currentSpread = 0
+	self.character_connection = RunService.RenderStepped:Connect(function()
+		if not root or not humanoid then return end
+		local speed      = Vector3.new(root.AssemblyLinearVelocity.X, 0, root.AssemblyLinearVelocity.Z).Magnitude
+		local alpha      = (humanoid.WalkSpeed > 0) and math.clamp(speed / humanoid.WalkSpeed, 0, 1) or 0
+		local target     = alpha * max_aiming
+		currentSpread    = currentSpread + (target - currentSpread) * 0.15
+		local offset     = 5 + currentSpread
+		up.Position    = UDim2.new(0.5, 0, 0, -offset)
+		down.Position  = UDim2.new(0.5, 0, 1,  offset)
+		left.Position  = UDim2.new(0, -offset, 0.5, 0)
+		right.Position = UDim2.new(1,  offset, 0.5, 0)
+	end)
+end
+
+function BaseTool:_disable_aiming_ui()
+	local aiming_gui = LOCAL_PLAYER.PlayerGui.Aiming
+	aiming_gui.Regular_Crosshair.Visible = true
+	aiming_gui.Scoped_In.Visible = false
+	if self.character_connection then
+		self.character_connection:Disconnect()
+		self.character_connection = nil
 	end
 end
 
+--------------------------------------------------------------------------------
+-- Shared: notifications
+--------------------------------------------------------------------------------
 
+function BaseTool:notify(text: string)
+	local Notifications_util = require(
+		LOCAL_PLAYER.PlayerGui:WaitForChild("Notifications"):WaitForChild("Utils")
+	)
+	Notifications_util.send_notification(LOCAL_PLAYER, text)
+end
 
--- // Effect Automation
+--------------------------------------------------------------------------------
+-- Shared: ammo check
+--------------------------------------------------------------------------------
+
+function BaseTool:ammo_check()
+	if not self.RegisteredAnimations or not self.RegisteredAnimations.Check then return end
+	if self:_isBusy() then return end
+
+	local ammo_check_part, ammo_check_utils
+	if not workspace.CurrentCamera:FindFirstChild("Ammo_Check") then
+		ammo_check_part  = game.ReplicatedStorage.Shared.Assets.Guns.Effects.AmmoUI.Ammo_Check:Clone()
+		ammo_check_part.Parent = workspace.CurrentCamera
+		ammo_check_utils = require(ammo_check_part.Utils)
+	else
+		ammo_check_part  = workspace.CurrentCamera.Ammo_Check
+		ammo_check_utils = require(workspace.CurrentCamera.Ammo_Check.Utils)
+	end
+
+	self:_stopAllExcept()
+	self.RegisteredAnimations.Check:Play()
+	self.RegisteredAnimations.Check.Stopped:Wait()
+
+	local hrp = LOCAL_PLAYER.Character.HumanoidRootPart
+	ammo_check_part.Position = hrp.Position + hrp.CFrame.RightVector * 2 + Vector3.new(0, 1.5, 0)
+
+	local weld   = Instance.new("WeldConstraint")
+	weld.Part0   = ammo_check_part
+	weld.Part1   = hrp
+	weld.Parent  = ammo_check_part
+
+	local pct = math.clamp(self.Capacity / self.Max_Capacity, 0, 1)
+	ammo_check_utils.utils(self.Ammo_Type, pct, false)
+
+	self:_restoreBase()
+end
+
+--------------------------------------------------------------------------------
+-- Shared: VFX
+--------------------------------------------------------------------------------
+
 function BaseTool:emit_effect(
-	effect: Part,
-	CFrame_Value: CFrame,
-	target_tables: {string},
-	parent: Instance,
-	emit_count: number,
+	effect:           Part,
+	CFrame_Value:     CFrame,
+	target_tables:    { string },
+	parent:           Instance,
+	emit_count:       number,
 	attach_to_parent: boolean
 )
-
 	emit_count = emit_count or 10
 
 	for _, child in pairs(effect:GetDescendants()) do
+		local match = table.find(target_tables, child.Name) or table.find(target_tables, child.ClassName)
+		if not match then continue end
 
-		local match = table.find(target_tables, child.Name) 
-			or table.find(target_tables, child.ClassName)
-
-		if not match then
-			continue
-		end
-
-		local clone = child:Clone()
-		local container: Instance = parent
+		local clone     = child:Clone()
+		local container = parent
 
 		if attach_to_parent then
 			clone.Parent = parent
 		else
-			local part = Instance.new("Part")
-			part.Size = Vector3.new(0.05, 0.05, 0.05)
-			part.Anchored = true
-			part.CanCollide = false
+			local part        = Instance.new("Part")
+			part.Size         = Vector3.new(0.05, 0.05, 0.05)
+			part.Anchored     = true
+			part.CanCollide   = false
 			part.Transparency = 1
-			part.Parent = workspace
-
-			part.CFrame = CFrame_Value
-
-			clone.Parent = part
-			container = part
+			part.Parent       = workspace
+			part.CFrame       = CFrame_Value
+			clone.Parent      = part
+			container         = part
 		end
-
 
 		if clone:IsA("ParticleEmitter") then
 			clone.Enabled = true
 			clone:Emit(emit_count)
-
-			-- Cleanup based on lifetime
 			local lifetime = clone.Lifetime.Max
-
 			task.delay(lifetime + 0.1, function()
 				if attach_to_parent then
-					if clone then
-						clone:Destroy()
-					end
+					if clone then clone:Destroy() end
 				else
-					if container then
-						container:Destroy()
-					end
+					if container then container:Destroy() end
 				end
 			end)
 		end
 	end
-	
+
 	vfx_cast_event:FireServer(effect, CFrame_Value, target_tables, parent, emit_count, attach_to_parent)
 end
 
-function BaseTool:bullet_hole(position, normal)
-	local bulletholes_folder = workspace.Game_Details.Effects.BulletHoles
-
-	local bullethole_clone = FX_BULLET_HOLE:Clone()
-	bullethole_clone.CFrame = CFrame.new(position, position + normal)
-	bullethole_clone.Parent = bulletholes_folder
-	
-	texture_event:FireServer(FX_BULLET_HOLE, position, normal, bulletholes_folder)
+function BaseTool:bullet_hole(position: Vector3, normal: Vector3)
+	local folder = workspace.Game_Details.Effects.BulletHoles
+	local clone  = FX_BULLET_HOLE:Clone()
+	clone.CFrame = CFrame.new(position, position + normal)
+	clone.Parent = folder
+	texture_event:FireServer(FX_BULLET_HOLE, position, normal, folder)
 end
--- // Cleanup
+
+--------------------------------------------------------------------------------
+-- Stubs (subclass must implement)
+--------------------------------------------------------------------------------
+
+function BaseTool:activate()
+	error(self.className .. " missing activate()")
+end
+
+function BaseTool:reload()
+	-- Optional. Subclass implements if the weapon reloads.
+end
+
+--------------------------------------------------------------------------------
+-- Cleanup
+--------------------------------------------------------------------------------
 
 function BaseTool:destroy()
 	if self._activationConnection then
 		self._activationConnection:Disconnect()
 		self._activationConnection = nil
 	end
+	self:_disconnectInput()
 	self:_stopShoulderTracking()
 	self:_stopAimTracking()
 	self:_resetMotor6D()

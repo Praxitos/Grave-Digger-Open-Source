@@ -9,7 +9,6 @@
 --------------------------------------------------------------------------------
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local UserInputService  = game:GetService("UserInputService")
 
 local Types    = require(script.Parent.Parent.Parent.Types)
 local BaseTool = require(script.Parent.Parent.BaseTool)
@@ -19,23 +18,49 @@ local Util     = require(script.Parent.Parent.Parent.Util)
 -- Asset paths
 --------------------------------------------------------------------------------
 
-local Assets        = ReplicatedStorage.Shared.Assets
+local Assets      = ReplicatedStorage.Shared.Assets
 local HolsterFolder = Assets.Guns.Holsters:FindFirstChild("Gun Holsters")
-local ToolFolder    = Assets.Guns.ToolModels
-local AnimFolder    = Assets.Animations.Tools.Guns.PrinceRifle
-local FxFolder      = Assets.Guns.Effects.Shooting
+local ToolFolder  = Assets.Guns.ToolModels
+local AnimFolder  = Assets.Animations.Tools.Guns.PrinceRifle
+local FxFolder    = Assets.Guns.Effects.Shooting
 
 local FX_MUZZLE_FLASH = FxFolder.Muzzle_Flash
-local FX_WOOD_CHIPS   = FxFolder.Parent.Environment.Wood_Chips
 
 --------------------------------------------------------------------------------
 -- Tuning
 --------------------------------------------------------------------------------
 
-local CYCLE_REST_TIME   = 0.15  -- seconds to pause after bolt cycle
-local FIRE_RATE         = 0.30  -- minimum seconds between shots
-local PENETRATION_RANGE = 50    -- max stud distance at which bullets can penetrate
-local BULLET_SPEED      = 1000  -- studs/s
+local CYCLE_REST_TIME = 0.15
+local FIRE_RATE       = 0.30
+local BULLET_SPEED    = 1000
+
+--------------------------------------------------------------------------------
+-- Animation layers
+-- Layer 0 = base pose  (Hold, Aim, Aim_Left)
+-- Layer 1 = fire/cycle overlay (stops only same-layer peers)
+-- Layer 2 = full takeover (Draw, Unequip, Reload*, Alt_Mode*, Check)
+--------------------------------------------------------------------------------
+
+local ANIM_LAYERS: { [string]: number } = {
+	Hold    = 0,
+	Aim     = 0,
+	Aim_Left = 0,
+
+	Fire      = 1,
+	Fire_Left = 1,
+	Cycle     = 1,
+
+	Draw         = 2,
+	Unequip      = 2,
+	Check        = 2,
+	Reload_Empty = 2,
+	Reload_Start = 2,
+	Reload_Loop  = 2,
+	Reload_End   = 2,
+	Reload_Alt   = 2,
+	Alt_Mode_On  = 2,
+	Alt_Mode_Off = 2,
+}
 
 --------------------------------------------------------------------------------
 -- Class
@@ -56,7 +81,6 @@ export type PrinceRifle = typeof(setmetatable({} :: {
 	model_reference:   Model?,
 	actual_model:      Model?,
 
-	-- Stats
 	damage:                  number,
 	Max_Capacity:            number,
 	Capacity:                number,
@@ -65,8 +89,9 @@ export type PrinceRifle = typeof(setmetatable({} :: {
 	recoil_count:            number,
 	Penetration_Level:       number,
 	Armor_Penetration_Level: number,
+	KnockBack_Force:         number,
+	Aiming_Number:           number,
 
-	-- State flags
 	Aiming:    boolean,
 	Cycled:    boolean,
 	Firing:    boolean,
@@ -77,6 +102,8 @@ export type PrinceRifle = typeof(setmetatable({} :: {
 
 	_reloadCancelled: boolean,
 
+	ANIM_LAYERS: { [string]: number },
+
 	current_shoulder: string,
 
 	Caster:         any,
@@ -84,9 +111,6 @@ export type PrinceRifle = typeof(setmetatable({} :: {
 
 	motor_6d:       Motor6D?,
 	_motorOriginal: { C0: CFrame, C1: CFrame, Part0: BasePart?, Part1: BasePart? }?,
-
-	_inputBeganConn: RBXScriptConnection?,
-	_inputEndedConn: RBXScriptConnection?,
 }, {} :: typeof(PrinceRifle)))
 
 --------------------------------------------------------------------------------
@@ -96,17 +120,15 @@ export type PrinceRifle = typeof(setmetatable({} :: {
 function PrinceRifle.new(info: Types.BaseToolCreateInfo): PrinceRifle
 	local self = setmetatable(BaseTool.new(info), PrinceRifle)
 
-	-- Identity
 	self.className   = "PrinceRifle"
 	self.item_image  = "rbxassetid://17496049645"
 	self.Designation = "Primary"
+	self.ANIM_LAYERS = ANIM_LAYERS
 
-	-- References
 	self.holster_reference = HolsterFolder and HolsterFolder:FindFirstChild("PrinceRifleHolster")
 	self.model_reference   = ToolFolder:FindFirstChild("PrinceRifle")
 	self.Round             = Assets.Guns.Rounds.PrinceRifle_Round
 
-	-- Motor6D attachment
 	self.motor_6d_data = {
 		Parent = "Left Arm",
 		Part0  = "Left Arm",
@@ -115,7 +137,6 @@ function PrinceRifle.new(info: Types.BaseToolCreateInfo): PrinceRifle
 			* CFrame.Angles(math.rad(0.979), math.rad(-90), math.rad(90)),
 	}
 
-	-- Animation references
 	self.animations = {
 		Draw    = AnimFolder.PrinceRifle_Draw,
 		Hold    = AnimFolder.PrinceRifle_Held,
@@ -141,7 +162,6 @@ function PrinceRifle.new(info: Types.BaseToolCreateInfo): PrinceRifle
 		Check = AnimFolder.PrinceRifle_Check,
 	}
 
-	-- Weapon stats
 	self.damage                  = 25
 	self.Max_Capacity            = 10
 	self.Capacity                = 10
@@ -150,8 +170,9 @@ function PrinceRifle.new(info: Types.BaseToolCreateInfo): PrinceRifle
 	self.recoil_count            = 6
 	self.Penetration_Level       = 2
 	self.Armor_Penetration_Level = 3
+	self.KnockBack_Force         = 10
+	self.Aiming_Number           = 100
 
-	-- State
 	self.unequip_wait     = true
 	self.Cycled           = true
 	self.Firing           = false
@@ -161,12 +182,17 @@ function PrinceRifle.new(info: Types.BaseToolCreateInfo): PrinceRifle
 	self.Alting           = false
 	self._reloadCancelled = false
 
-	-- Projectile caster
 	self.Caster, self.CasterBehavior = Util.setupFastCast({
 		bulletTemplate  = FxFolder.Bullet,
 		bulletContainer = workspace.Game_Details.Effects.Bullets,
 		onHit           = function(cast, result, velocity)
-			self:_onBulletHit(cast, result, velocity, self.Penetration_Level)
+			self:_onBulletHit(
+				cast, result, velocity,
+				self.actual_model and self.actual_model:FindFirstChild("PrinceRifle_Muzzle"),
+				self.Penetration_Level,
+				self.damage,
+				self.KnockBack_Force
+			)
 		end,
 	})
 
@@ -175,126 +201,39 @@ function PrinceRifle.new(info: Types.BaseToolCreateInfo): PrinceRifle
 	return self
 end
 
+--------------------------------------------------------------------------------
+-- Private: key bindings (extends BaseTool defaults)
+--------------------------------------------------------------------------------
+
+function PrinceRifle:_getKeyBindings()
+	local base = BaseTool._getKeyBindings(self)
+	base.AltMode = Enum.KeyCode.F
+	return base
+end
+
+-- Called by BaseTool._connectInput when the F key is pressed.
+function PrinceRifle:AltMode()
+	self:setAltMode()
+end
 
 --------------------------------------------------------------------------------
--- Private: State helpers
+-- Private: isBusy (includes Alting)
 --------------------------------------------------------------------------------
 
--- Returns true while any exclusive action is in progress.
 function PrinceRifle:_isBusy(): boolean
 	return self.Firing or self.Cycling or self.Reloading or self.Alting
-end
-
--- Hard-stops every registered AnimationTrack, optionally skipping one by name.
-function PrinceRifle:_stopAllExcept(except: string?)
-	local anims = self.RegisteredAnimations
-	if not anims then return end
-
-	for name, track in pairs(anims) do
-		if name == except then continue end
-		if not track:IsA("AnimationTrack") then continue end
-		if track.IsPlaying then track:Stop(0) end
-	end
-end
-
--- Restores the correct idle or aim base track after an action finishes.
--- Must only be called once _isBusy() is false.
-function PrinceRifle:_restoreBase()
-	if self:_isBusy() then return end
-	if not self.Equipped then return end  -- never play animations after unequip
-
-	local anims = self.RegisteredAnimations
-	if not anims then return end
-
-	-- Hard-kill both aim tracks before deciding which to replay,
-	-- preventing any single-frame blend between them.
-	if anims.Aim      and anims.Aim.IsPlaying      then anims.Aim:Stop(0)      end
-	if anims.Aim_Left and anims.Aim_Left.IsPlaying then anims.Aim_Left:Stop(0) end
-
-	if self.Aiming then
-		local aimTrack = (self.current_shoulder == "Right") and anims.Aim or anims.Aim_Left
-		aimTrack:Play()
-	else
-		if anims.Hold and not anims.Hold.IsPlaying then
-			anims.Hold:Play()
-		end
-	end
-end
-
---------------------------------------------------------------------------------
--- Private: Input
---------------------------------------------------------------------------------
-
-function PrinceRifle:_connectInput()
-	self._inputBeganConn = UserInputService.InputBegan:Connect(function(input, processed)
-		if processed then return end
-
-		if input.UserInputType == Enum.UserInputType.MouseButton2 then
-			self:aim()
-		elseif input.KeyCode == Enum.KeyCode.R then
-			self:reload()
-		elseif input.KeyCode == Enum.KeyCode.F then
-			self:setAltMode()
-		elseif input.KeyCode == Enum.KeyCode.T then
-			self:ammo_check()
-		end
-	end)
-
-	self._inputEndedConn = UserInputService.InputEnded:Connect(function(input, processed)
-		if processed then return end
-
-		if input.UserInputType == Enum.UserInputType.MouseButton2 then
-			self:endAiming()
-		end
-	end)
-end
-
-function PrinceRifle:_disconnectInput()
-	if self._inputBeganConn then
-		self._inputBeganConn:Disconnect()
-		self._inputBeganConn = nil
-	end
-	if self._inputEndedConn then
-		self._inputEndedConn:Disconnect()
-		self._inputEndedConn = nil
-	end
-end
-
---------------------------------------------------------------------------------
--- Private: Shoulder tracking
---------------------------------------------------------------------------------
-
--- Called by BaseTool when Current_Shoulder changes.
--- current_shoulder is already updated by BaseTool before this fires.
--- If cycling: do nothing — cycle() hard-stops all tracks anyway, and
--- _restoreBase at the end will pick up the new shoulder value cleanly.
--- If aiming normally: swap aim tracks immediately.
-function PrinceRifle:_onShoulderChanged()
-	if self.Cycling then return end
-	if not self.Aiming then return end
-
-	local anims = self.RegisteredAnimations
-	if not anims then return end
-
-	if self.current_shoulder == "Right" then
-		if anims.Aim_Left and anims.Aim_Left.IsPlaying then anims.Aim_Left:Stop(0) end
-		if anims.Aim and not anims.Aim.IsPlaying then anims.Aim:Play() end
-	else
-		if anims.Aim and anims.Aim.IsPlaying then anims.Aim:Stop(0) end
-		if anims.Aim_Left and not anims.Aim_Left.IsPlaying then anims.Aim_Left:Play() end
-	end
 end
 
 --------------------------------------------------------------------------------
 -- Public: Actions
 --------------------------------------------------------------------------------
 
--- Toggles between single-fire and repeating (alt) fire mode.
 function PrinceRifle:setAltMode()
 	if self:_isBusy() then return end
 	self.Alting = true
 
 	local anims = self.RegisteredAnimations
+	self:_stopAllExcept()
 
 	if self.Alt_Mode then
 		anims.Alt_Mode_Off:Play()
@@ -309,110 +248,27 @@ function PrinceRifle:setAltMode()
 	end
 
 	self.Alting = false
-	task.defer(function() self:_restoreBase() end)
+	self:_restoreBase()
 end
 
--- Transitions into aimed stance. Defers the anim play by one frame so the
--- animator flushes all Stop(0) calls before evaluating the first keyframe.
-function PrinceRifle:aim()
-	if self:_if_sprinting() then return end
-	if self.Aiming or self:_isBusy() then return end
-
-	self.Aiming = true
-	self:_startAimTracking()
-
-	local anims = self.RegisteredAnimations
-	if not anims then return end
-
-	if anims.Hold     and anims.Hold.IsPlaying     then anims.Hold:Stop(0)     end
-	if anims.Aim      and anims.Aim.IsPlaying      then anims.Aim:Stop(0)      end
-	if anims.Aim_Left and anims.Aim_Left.IsPlaying then anims.Aim_Left:Stop(0) end
-
-	task.defer(function()
-		if not self.Aiming then return end -- RMB released within the same frame
-		local aimTrack = (self.current_shoulder == "Right") and anims.Aim or anims.Aim_Left
-		aimTrack:Play()
-	end)
-
-	game.Players.LocalPlayer.Character:SetAttribute("Aiming", true)
-end
-
--- Exits aimed stance. If Aim was playing it reverse-plays back to frame 0
--- before restoring Hold, producing a clean un-aim transition.
-function PrinceRifle:endAiming()
-	self.Aiming = false
-	self:_stopAimTracking()
-
-	local anims = self.RegisteredAnimations
-	if not anims then return end
-
-	-- Kill Aim_Left first so it never overlaps the Aim reverse-play.
-	if anims.Aim_Left and anims.Aim_Left.IsPlaying then
-		anims.Aim_Left:Stop(0)
-	end
-
-	local aimTrack = anims.Aim
-	if aimTrack and aimTrack.IsPlaying then
-		aimTrack.TimePosition = 1
-		aimTrack:AdjustSpeed(-1)
-		aimTrack.Stopped:Once(function()
-			aimTrack:AdjustSpeed(1)
-			-- Start Hold inside the callback so it never overlaps the
-			-- reverse-play tail.
-			if not self:_isBusy() and not self.Aiming then
-				if anims.Hold and not anims.Hold.IsPlaying then
-					anims.Hold:Play()
-				end
-			end
-		end)
-	else
-		-- Aim wasn't playing (left shoulder or not yet started)
-		if not self:_isBusy() then
-			if anims.Hold and not anims.Hold.IsPlaying then
-				anims.Hold:Play()
-			end
-		end
-	end
-
-	game.Players.LocalPlayer.Character:SetAttribute("Aiming", false)
-end
-
--- Plays the bolt-cycle animation. Hard-stops ALL other tracks first so
--- nothing from the previous state bleeds into the cycle clip.
--- Ammo count is shown when the "vfx_ammo_show" keyframe is hit mid-animation
--- (add that marker in the animation editor at whatever point feels natural —
--- roughly when the bolt is fully open). Falls back to showing after the
--- animation ends if the keyframe is not present.
 function PrinceRifle:cycle()
 	if self.Cycling then return end
 	self.Cycling = true
 
 	local anims = self.RegisteredAnimations
-	if not anims then
-		self.Cycling = false
-		return
-	end
+	if not anims then self.Cycling = false; return end
 
-	-- Flush every track except Cycle itself.
-	for name, track in pairs(anims) do
-		if name == "Cycle" then continue end
-		if not track:IsA("AnimationTrack") then continue end
-		if track.IsPlaying then track:Stop(0) end
-	end
-
-	anims.Cycle:Play()
-	anims.Cycle.Stopped:Wait()
-
+	self:_stopAllExcept()
+	anims.Cycle:Play(0, 1, 1)
+	anims.Cycle.Stopped:Once(function()
+		self:_restoreBase()
+	end)
 	task.wait(CYCLE_REST_TIME)
 
 	self.Cycled  = true
 	self.Cycling = false
-
-	self:_restoreBase() 
 end
 
--- Fires one round: spawns projectile, applies recoil, plays animation and
--- muzzle FX, then branches into alt-mode auto-cycle when enabled.
 function PrinceRifle:fire()
 	if self.Capacity <= 0 then
 		self:reload()
@@ -427,39 +283,29 @@ function PrinceRifle:fire()
 		return
 	end
 
-	-- Projectile
 	local direction = muzzle.CFrame.LookVector.Unit
-	local activeCast = self.Caster:Fire(muzzle.Position, direction, BULLET_SPEED, self.CasterBehavior)
+	local shootDir  = game.Players.LocalPlayer:GetAttribute("FreeLook")
+		and direction
+		or workspace.CurrentCamera.CFrame.LookVector.Unit
+
+	local activeCast = self.Caster:Fire(muzzle.Position, shootDir, BULLET_SPEED, self.CasterBehavior)
 	activeCast.UserData.Direction  = direction
 	activeCast.UserData.Penetrated = false
 
-	self:_connect_FastCast(muzzle.Position, direction, BULLET_SPEED, {bulletTemplate  = FxFolder.Bullet,
+	self:_connect_FastCast(muzzle.Position, direction, BULLET_SPEED, {
+		bulletTemplate  = FxFolder.Bullet,
 		bulletContainer = workspace.Game_Details.Effects.Bullets,
-		onHit           = function(cast, result, velocity)
-			self:_onBulletHit(cast, result, velocity, self.Penetration_Level)
-		end,})
-	
-	-- State
+	})
+
 	self.Cycled   = false
 	self.Capacity -= 1
 
-	-- Animation
 	local anims    = self.RegisteredAnimations
 	local fireAnim = (self.current_shoulder == "Right") and anims.Fire or anims.Fire_Left
 	fireAnim:Play()
 
-	-- Give cycle() one deferred frame to raise Cycling = true before we
-	-- decide whether to fall back to idle/aim.
-	fireAnim.Stopped:Once(function()
-		task.defer(function()
-			if not self:_isBusy() then self:_restoreBase() end
-		end)
-	end)
-
-	-- Recoil
 	Util.applyRecoil(self.recoil, self.recoil_count, 10, false)
 
-	-- Muzzle FX
 	local muzzleEquipped = game.Players.LocalPlayer.Character
 		.CharacterData.Equipment.PrinceRifle.PrinceRifle_Muzzle
 	self:emit_effect(
@@ -473,37 +319,35 @@ function PrinceRifle:fire()
 
 	task.wait(FIRE_RATE)
 	self.Firing = false
+	self:_restoreBase()
 
 	if self.Alt_Mode then
 		self:_altReload()
 	end
 end
 
--- Alt-mode lever slap: plays the quick re-cock animation and adds one round.
 function PrinceRifle:_altReload()
 	local anims = self.RegisteredAnimations
+	self:_stopAllExcept()
 	anims.Reload_Alt:Play()
 	anims.Reload_Alt.Stopped:Wait()
 	self.Cycled   = true
 	self.Capacity += 1
-	task.defer(function() self:_restoreBase() end)
+	self:_restoreBase()
 end
 
--- Full tube reload. Feeds rounds one by one via Reload_Loop until full
--- or cancelled by unequip.
 function PrinceRifle:reload()
 	if self.Reloading then return end
 	if self.Capacity >= self.Max_Capacity then return end
 
 	if self.Aiming then self:endAiming() end
 
-	self:_stopAllExcept(nil)
+	self:_stopAllExcept()
 	self.Reloading        = true
 	self._reloadCancelled = false
 
 	local anims = self.RegisteredAnimations
 
-	-- Opening animation: empty-chamber vs. mid-tube
 	if self.Capacity == 0 then
 		anims.Reload_Empty:Play()
 		anims.Reload_Empty.Stopped:Wait()
@@ -512,7 +356,6 @@ function PrinceRifle:reload()
 		anims.Reload_Start.Stopped:Wait()
 	end
 
-	-- Feed loop
 	while self.Capacity < self.Max_Capacity and not self._reloadCancelled do
 		anims.Reload_Loop:Play()
 		anims.Reload_Loop.Stopped:Wait()
@@ -530,18 +373,16 @@ function PrinceRifle:reload()
 		anims.Reload_End.Stopped:Wait()
 	else
 		for _, name in ipairs({ "Reload_Loop", "Reload_Start", "Reload_Empty" }) do
-			local track = anims[name]
-			if track and track.IsPlaying then track:Stop(0) end
+			local t = anims[name]
+			if t and t.IsPlaying then t:Stop(0) end
 		end
 	end
 
 	self.Reloading        = false
 	self._reloadCancelled = false
-
-	task.defer(function() self:_restoreBase() end)
+	self:_restoreBase()
 end
 
--- Primary activation: cycles the bolt if the action is open, otherwise fires.
 function PrinceRifle:activate()
 	if not self.actual_model then return end
 	if self:_isBusy() then return end
@@ -562,7 +403,6 @@ end
 
 function PrinceRifle:_on_equip()
 	self.Equipped = true
-
 	self:_cacheMotor6D()
 	self:_connectInput()
 	self:_initShoulderTracking()
@@ -570,17 +410,14 @@ function PrinceRifle:_on_equip()
 	local char = game.Players.LocalPlayer.Character
 	char:SetAttribute("Sprint_Animation", "PrinceRifle")
 
-	-- Keyframe-driven round visibility for eject/insert VFX
+	-- Keyframe-driven round visibility
 	for _, track in pairs(self.RegisteredAnimations) do
 		if not track:IsA("AnimationTrack") then continue end
-
 		track.KeyframeReached:Connect(function(keyframe)
 			local rightArm = char:FindFirstChild("Right Arm")
 			if not rightArm then return end
-
 			local round = rightArm:FindFirstChild(self.Round.Name)
 			if not round then return end
-
 			if keyframe == "vfx_hand_shell_visible" then
 				round.Transparency = 0
 			elseif keyframe == "vfx_hand_shell_invisible" then
@@ -591,8 +428,8 @@ function PrinceRifle:_on_equip()
 end
 
 function PrinceRifle:_on_unequip()
-	self.Equipped = false
-	self._reloadCancelled = true -- cancel any in-progress reload
+	self.Equipped         = false
+	self._reloadCancelled = true
 
 	self:_disconnectInput()
 	self:_stopShoulderTracking()
