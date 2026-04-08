@@ -547,13 +547,11 @@ function module.start_module()
 	fastcast_replicant.OnClientEvent:Connect(function(...)
 		local args = {...}
 		local player = args[1]
+		if player.Name == local_player.Name then return end
 		local origin = args[2]
 		local direction = args[3]
 		local speed = args[4]
 		local cast_data = args[5]
-		
-		if player.Name == local_player.Name then return end
-	
 		local caster, caster_data = utilities.setupFastCast(cast_data)
 		local cast = caster:Fire(origin + Vector3.new(5,5,5), direction, speed, caster_data)
 	end)
@@ -561,12 +559,16 @@ function module.start_module()
 	vfx_replicant.OnClientEvent:Connect(function(...)
 			local args = {...}
 			
+			local player = args[1]
+			if player.Name == local_player.Name then return end
+			
 			local effect = args[2]
 			local CFrame_Value = args[3]
 			local target_tables = args[4]
 			local parent = args[5]
 			local emit_count = args[6]
 			local attach_to_parent = args[7]
+			
 			
 			
 			emit_count = emit_count or 10
@@ -625,10 +627,13 @@ function module.start_module()
 	texture_replicant.OnClientEvent:Connect(function(...)
 		local args = {...}
 
-		local part = args[1]
-		local position = args[2]
-		local normal = args[3]
-		local parent = args[4]
+		local player = args[1]
+		local part = args[2]
+		local position = args[3]
+		local normal = args[4]
+		local parent = args[5]
+		
+		if player.Name == local_player.Name then return end
 		
 		local texture_clone = part:Clone()
 		texture_clone.CFrame = CFrame.new(position, position + normal)
