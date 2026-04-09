@@ -15,7 +15,7 @@ local CameraClass = require(script.Parent.Parent.Parent.Parent.Library.Classes.M
 local main_util   = require(ReplicatedStorage.Shared.Library.Util)
 
 ------------------------------------------------------------------------
--- Tuning
+-- Camera Values (Matching Second Script)
 ------------------------------------------------------------------------
 
 local PITCH_MIN = math.rad(-70)
@@ -37,7 +37,7 @@ local MAX_FOV   = 80
 local FOV_SPEED = 4
 
 local ZOOM_MIN        = 2
-local ZOOM_MAX        = 6
+local ZOOM_MAX        = 3
 local ZOOM_STEP       = 0.6
 local ZOOM_LERP_SPEED = 10
 
@@ -53,12 +53,11 @@ local FREELOOK_DEBOUNCE     = 0.15
 
 local RECOIL_DECAY_SPEED = 8
 
--- Hold breath / aiming FOV
 local HOLD_BREATH_FOV      = 40
 local HOLD_BREATH_IN_TIME  = 1
 local HOLD_BREATH_OUT_TIME = 0.5
 local AIM_FOV              = 50
-local AIM_FOV_IN_TIME      = 0.15  -- tweak for faster/slower zoom-in feel
+local AIM_FOV_IN_TIME      = 0.15
 local AIM_FOV_OUT_TIME     = 0.12
 
 ------------------------------------------------------------------------
@@ -128,15 +127,13 @@ local function exitFreeLook(self, char)
 	InputService.MouseIconEnabled = false
 	local h = char and char:FindFirstChildOfClass("Humanoid")
 	if h then h.AutoRotate = false end
-	
+
 	LocalPlayer.PlayerGui.Aiming.Regular_Crosshair.Visible = true
 	LocalPlayer:SetAttribute("FreeLook", nil)
 end
 
 ------------------------------------------------------------------------
 -- FOV tween helper
--- Cancels any in-progress FOV tween before starting a new one so
--- rapid aim-in/aim-out never stacks or fights itself.
 ------------------------------------------------------------------------
 
 local activeFOVTween: Tween? = nil
@@ -458,7 +455,7 @@ function BaseCamera:Start()
 
 			connectCharacterAttributes(newCharacter)
 		end),
-		
+
 		LocalPlayer.Character:WaitForChild("Humanoid").Died:Connect(function()
 			local bodies = Workspace:FindFirstChild("Game_Details") and Workspace.Game_Details:FindFirstChild("Bodies")
 			if not bodies then return end
@@ -496,7 +493,7 @@ function BaseCamera:ApplyRecoil(pitchDelta: number, yawDelta: number)
 end
 
 ------------------------------------------------------------------------
--- Update
+-- Update (Main Camera Logic - Matches Second Script)
 ------------------------------------------------------------------------
 
 function BaseCamera:Update(dt: number)
@@ -531,7 +528,7 @@ function BaseCamera:Update(dt: number)
 	local root     = character:FindFirstChild("HumanoidRootPart")
 	local humanoid = character:FindFirstChildOfClass("Humanoid")
 	if not root or not humanoid then return end
-	
+
 	self.RaycastParams.FilterDescendantsInstances = {character}
 
 	local heightOffset = getOffset("heightOffset", DEFAULT_HEIGHT)
@@ -542,30 +539,6 @@ function BaseCamera:Update(dt: number)
 	-- 1. Mouse delta → angles
 	--------------------------------------------------------------------
 
-	local delta = InputService:GetMouseDelta()
-
-	-- Death spectate
-	if self.DeathSubject then
-		local subjectPos
-		if self.DeathSubject:IsA("Model") then
-			subjectPos = self.DeathSubject.PrimaryPart and self.DeathSubject.PrimaryPart.Position or getHeadPos(self.DeathSubject)
-		else
-			subjectPos = self.DeathSubject.Position
-		end
-
-		self.DeathOrbitYaw   += math.rad(-delta.X * sensitivity)
-		self.DeathOrbitPitch += math.rad(-delta.Y * sensitivity)
-		self.DeathOrbitPitch  = math.clamp(self.DeathOrbitPitch, PITCH_MIN, PITCH_MAX)
-
-		local rot        = CFrame.Angles(0, self.DeathOrbitYaw, 0) * CFrame.Angles(self.DeathOrbitPitch, 0, 0)
-		local desiredPos = subjectPos - rot.LookVector * self.DeathOrbitDistance
-		self.SmoothedPos = lerpVec(self.SmoothedPos, desiredPos, CAM_SMOOTH_SPEED, dt)
-
-		Camera.CFrame = CFrame.new(self.SmoothedPos) * CFrame.Angles(0, self.DeathOrbitYaw, 0) * CFrame.Angles(self.DeathOrbitPitch, 0, 0)
-		print("Death Subject")
-		return
-	end
-	
 	if self.IsFreeLook then
 		humanoid.AutoRotate = true
 		if self.FreeLookPhase == "orbiting" then
@@ -668,7 +641,7 @@ function BaseCamera:Update(dt: number)
 		if not LocalPlayer:GetAttribute("FreeLook") then
 			LocalPlayer:SetAttribute("FreeLook", true)
 		end
-		
+
 		if self.FreeLookPhase == "panning" then
 			local orbitPos = headPos - rotation.LookVector * FREELOOK_ORBIT_DISTANCE
 			self.SmoothedPos = lerpVec(self.SmoothedPos, orbitPos, FREELOOK_PAN_SPEED, dt)
@@ -743,6 +716,7 @@ function BaseCamera:Cut()
 	print("[CAMERASERVICE::] Cutting camera:", self.name)
 	self:End()
 end
+
 ------------------------------------------------------------------------
 -- Init
 ------------------------------------------------------------------------
