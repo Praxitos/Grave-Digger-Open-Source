@@ -115,6 +115,14 @@ local function apply_full_appearance(character: Model, player: Player)
 	
 	shirt_clothing:Clone().Parent = character
 	pants_clothing:Clone().Parent = character
+
+	-- // remove texture of the hair, give a sand material, and color it brown
+	local hair = character:FindFirstChild("Hair")
+	local handle = hair:FindFirstChild("Handle")
+	local Mesh:SpecialMesh = handle:FindFirstChild("Mesh")
+	Mesh.TextureId = ""
+	handle.Material = Enum.Material.Sand
+	handle.BrickColor = BrickColor.new("Brown")
 end
 
 local function handle_character(player: Player, character: Model, ragdoll_object)
