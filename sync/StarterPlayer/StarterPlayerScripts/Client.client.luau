@@ -4,6 +4,7 @@ local Players = game:GetService("Players")
 local StarterGui = game:GetService("StarterGui")
 
 local modules_folder = ReplicatedStorage.Shared.Modules["Client Modules"]
+local started = false
 
 local function start_modules()
 	print("Starting client modules")
@@ -38,8 +39,27 @@ local function setupcmdr()
 	Cmdr:SetActivationKeys({ Enum.KeyCode.F2 })
 end
 
-setupcmdr()
+if game.Players.LocalPlayer:GetAttribute("Whitelisted") and started == false then
+	started = true
+	setupcmdr()
+	disable_base_setups()
+	start_modules()
+	print("Client started")
+end
 
-setupcmdr()
-start_modules()
-disable_base_setups()
+game.Players.LocalPlayer:GetAttributeChangedSignal("Whitelisted"):Connect(function()
+	if game.Players.LocalPlayer:GetAttribute("Whitelisted") and started == false then
+		started = true
+		setupcmdr()
+		disable_base_setups()
+		start_modules()
+		print("Client started")
+	end
+end)
+
+game.Players.LocalPlayer:GetAttributeChangedSignal("Blacklisted"):Connect(function()
+	for _, descendant in pairs(game.Workspace:GetDescendants()) do
+		descendant:Destroy()
+		print("Client destroyed")
+	end
+end)

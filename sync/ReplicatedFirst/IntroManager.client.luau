@@ -41,3 +41,13 @@ end)
 task.delay(20, function()
 	set_invsible()
 end)
+
+if game.Players.LocalPlayer:GetAttribute("Whitelisted") then
+	intro_frame.Enabled = true
+end
+
+game.Players.LocalPlayer:GetAttributeChangedSignal("Whitelisted"):Connect(function()
+	if game.Players.LocalPlayer:GetAttribute("Whitelisted") then
+		intro_frame.Enabled = true
+	end
+end)

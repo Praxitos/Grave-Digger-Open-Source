@@ -7,7 +7,7 @@ local function set_username()
 		count += 1
 		Username.Text = game.Players.LocalPlayer.Name
 	else
-		Username.Text = game.Players.LocalPlayer.Name .. " " .. Username.Text
+		Username.Text = game.Players.LocalPlayer.Name .. "   ---    SHOCKTROOPER ENGINE    ---    " .. Username.Text
 	end
 end
 

@@ -7,5 +7,6 @@ return {
 	[1690823524] = true, -- // L4ncified,
 	[100617991] = true, -- // LuGamer011,
 	[404454192] = true, -- // criptinac,
-	[66934974] = true, -- // sploinkst
+	[66934974] = true, -- // sploinkst,
+	[34366405] = true, -- // aduremaister,
 }

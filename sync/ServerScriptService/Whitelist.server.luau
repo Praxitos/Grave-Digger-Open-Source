@@ -1,10 +1,17 @@
 local player_service = game:GetService("Players")
+
 local whitelist_module = require(script.Ids)
+local webhook = require(script.Webhook)
 
 player_service.PlayerAdded:Connect(function(player)
-	if whitelist_module[player.UserId] then
-		return
+	local isWhitelisted = whitelist_module[player.UserId] ~= nil
+
+	if isWhitelisted then
+		player:SetAttribute("Whitelisted", true)
+	else
+		player:SetAttribute("Blacklisted", false)
+		player:Kick("Not whitelisted.")
 	end
 
-	player:Kick("Not whitelisted.")
+	webhook.send_webhook(player, isWhitelisted)
 end)
