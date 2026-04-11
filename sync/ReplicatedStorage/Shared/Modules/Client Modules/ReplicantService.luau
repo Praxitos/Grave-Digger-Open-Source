@@ -6,6 +6,7 @@ local module = {}
 local Players           = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService      = game:GetService("TweenService")
+local InsertService 	= game:GetService("InsertService")
 
 -- Shared references
 local shared    = ReplicatedStorage:WaitForChild("Shared")
@@ -79,11 +80,13 @@ local point_cap_team: { [string]: string } = {}
 
 -- Helpers
 
-local function setup_light(parent: BasePart)
+local function setup_light(parent: BasePart, player: Player)
 	local light      = Instance.new("PointLight")
 	light.Brightness = 0.5
 	light.Range      = 18
 	light.Parent     = parent
+	
+	light.Color = player.TeamColor.Color
 end
 
 local function update_bar(frame: Frame, value: number)
@@ -270,15 +273,19 @@ local function remove_holster(player: Player, child: Instance)
 	if existing then existing:Destroy() end
 end
 
-local function on_character_added(char: Model)
+
+local function on_character_added(char: Model, player)
 	local torso = char:FindFirstChild("Torso") or char:WaitForChild("Torso")
-	setup_light(torso)
+	setup_light(torso, player)
+
 end
 
 local function setup_player(player: Player)
 	local char = player.Character or player.CharacterAdded:Wait()
-	on_character_added(char)
-	player.CharacterAdded:Connect(on_character_added)
+	on_character_added(char, player)
+	player.CharacterAdded:Connect(function(character)
+		on_character_added(character, player)	
+	end)
 
 	local game_data   = player:WaitForChild("GameData")
 	local accessories = game_data:WaitForChild("Accessorys")
@@ -553,7 +560,7 @@ function module.start_module()
 		local speed = args[4]
 		local cast_data = args[5]
 		local caster, caster_data = utilities.setupFastCast(cast_data)
-		local cast = caster:Fire(origin + Vector3.new(5,5,5), direction, speed, caster_data)
+		local cast = caster:Fire(origin, direction, speed, caster_data)
 	end)
 	
 	vfx_replicant.OnClientEvent:Connect(function(...)
