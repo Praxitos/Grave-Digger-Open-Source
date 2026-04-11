@@ -77,7 +77,6 @@ local function apply_full_appearance(character: Model, player: Player)
 	currentDescription.RightLegColor = avatarDescription.RightLegColor
 	currentDescription.TorsoColor = avatarDescription.TorsoColor
 
-	currentDescription.Face = avatarDescription.Face
 	currentDescription.Head = avatarDescription.Head
 
 	
