@@ -1,5 +1,3 @@
---!strict
-
 ------------------------------------------------------------------------
 -- Services
 ------------------------------------------------------------------------
@@ -37,7 +35,7 @@ local MAX_FOV   = 80
 local FOV_SPEED = 4
 
 local ZOOM_MIN        = 2
-local ZOOM_MAX        = 3
+local ZOOM_MAX        = 6
 local ZOOM_STEP       = 0.6
 local ZOOM_LERP_SPEED = 10
 
@@ -679,7 +677,17 @@ function BaseCamera:Update(dt: number)
 	end
 
 	--------------------------------------------------------------------
-	-- 9. Smooth + apply
+	-- 9. Head neck rotation (follows camera pitch)
+	--------------------------------------------------------------------
+
+	local neckC0 = CFrame.new(0, 1, 0, -1, 0, 0, 0, 0, 1, 0, 1, -0)
+	local neckRotation = neckC0 * CFrame.Angles(-math.rad(activePitch * 40), 0, 0)
+	if character:FindFirstChild("Torso") and character.Torso:FindFirstChild("Neck") then
+		character.Torso.Neck.C0 = character.Torso.Neck.C0:Lerp(neckRotation, 0.1)
+	end
+
+	--------------------------------------------------------------------
+	-- 10. Smooth + apply
 	--------------------------------------------------------------------
 
 	self.SmoothedPos = lerpVec(self.SmoothedPos, finalPos, CAM_SMOOTH_SPEED, dt)
