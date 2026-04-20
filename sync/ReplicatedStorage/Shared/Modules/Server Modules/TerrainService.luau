@@ -25,14 +25,12 @@ local delete_terrain_event = replicatedstorage_service.Shared.Library.Events.Ter
 ---------------
 -- fills area with rock
 local function fill_mineable_region()
-	print("[TERRAINSERVICE:: Filled minable rock region.")
 	
 	terrain_service:FillBlock(mineable_region.CFrame, mineable_region.Size, Enum.Material.Rock)
 end
 
 -- fills area with basalt
 local function fill_unminable_regions()
-	print("[TERRAINSERVICE:: Filled unminable regions.")
 	
 	for _, child in pairs(mineable_region:GetChildren()) do
 		if string.find(child.Name, "nomining") then
@@ -45,7 +43,6 @@ end
 -- SPAWN ROOMS
 -----------------------
 local function set_spawn_rooms()
-	print("[TERRAINSERVICE:: Setting up spawn rooms.")
 	
 	nation_spawn.Parent = workspace_service.Game_Details.Main_Game
 	empire_spawn.Parent = workspace_service.Game_Details.Main_Game
@@ -54,7 +51,6 @@ end
 
 
 local function carve_spawn_rooms()
-	print("[TERRAINSERVICE:: Carving spawn rooms.")
 	
 	terrain_service:FillBlock(nation_spawn.basecenter.CFrame, nation_spawn.basecenter.Size, Enum.Material.Air)
 	terrain_service:FillBlock(empire_spawn.Terrain.Air.CFrame, empire_spawn.Terrain.Air.Size, Enum.Material.Air)
@@ -62,16 +58,12 @@ end
 
 
 local function basalt_spawns()
-	print("[TERRAINSERVICE:: Surrounding spawn rooms with basalt.")
 	terrain_service:FillBlock(nation_spawn.basecenter.CFrame, nation_spawn.basecenter.Size + Vector3.new(50, 50, 50), Enum.Material.Basalt)
 	terrain_service:FillBlock(empire_spawn.Terrain.Air.CFrame, empire_spawn.Terrain.Air.Size + Vector3.new(50, 50, 50), Enum.Material.Basalt)
 end
 
 local function carve_entrances()
 	-- // carving only entrance for now
-	
-	print("[TERRAINSERVICE:: Carving spawn entrances.")
-
 
 	for _, child in pairs(empire_spawn.Entrances:GetChildren()) do
 		terrain_service:FillBlock(child.CFrame, child.Size, Enum.Material.Air)
@@ -99,8 +91,6 @@ local function handle_delete_terrain(...)
 	elseif typeof(args[2]) == "number" and typeof(args[3]) == "number" and typeof(args[4]) == "number" then
 		position = Vector3.new(args[2], args[3], args[4])
 		size = args[5]
-	else
-		error("[TERRAINSERVICE] Invalid arguments")
 	end
 
 	-- Normalize size
@@ -112,7 +102,6 @@ local function handle_delete_terrain(...)
 end
 
 function module.start_module()
-	print("[TERRAINSERVICE:: Starting terrain service!")
 	
 	set_spawn_rooms()
 	fill_mineable_region()

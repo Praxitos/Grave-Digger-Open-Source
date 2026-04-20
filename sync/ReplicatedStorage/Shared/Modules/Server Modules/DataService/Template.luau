@@ -13,6 +13,7 @@ return {
 			["Shoulder Switch"] = "Enum.KeyCode.Q",
 			["First Person"] = "Enum.KeyCode.V",
 			["Sprint"] = "Enum.KeyCode.LeftShift",
+			["Crouch"] = "Enum.KeyCode.C",
 		},
 	},
 

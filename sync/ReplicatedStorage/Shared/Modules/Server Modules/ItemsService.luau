@@ -48,7 +48,6 @@ function module.give_item(player: Player, item: string)
 				clone.Parent = player.Character.CharacterData.Equipment
 				object.actual_model = clone
 
-				print("Cloned ModelReference")
 
 				local character = player.Character
 
@@ -57,7 +56,6 @@ function module.give_item(player: Player, item: string)
 					or character:FindFirstChild(object.motor_6d_data.Parent)
 
 				if not part0 then
-					warn("Could not find Part0:", object.motor_6d_data.Part0)
 					return
 				end
 
@@ -65,7 +63,6 @@ function module.give_item(player: Player, item: string)
 				local part1 = clone:FindFirstChild(object.motor_6d_data.Part1.Name, true)
 
 				if not part1 then
-					warn("Could not find Part1 in model:", object.motor_6d_data.Part1)
 					return
 				end
 
@@ -76,8 +73,6 @@ function module.give_item(player: Player, item: string)
 				motor6d.Part0 = part0
 				motor6d.Part1 = part1
 				motor6d.C0 = object.motor_6d_data.C0
-
-				print("Created Motor6D:", part0.Name, "->", part1.Name)
 			end
 			
 			-- // has a round it wants to be weld too
@@ -92,8 +87,6 @@ function module.give_item(player: Player, item: string)
 				
 				motor6d.C1 = CFrame.new(0, 0, -0.15)
 				motor6d.Name = "Round_Motor6d"
-				
-				print("Succesfully gave round")
 			end
 		end)
 		
@@ -102,19 +95,15 @@ function module.give_item(player: Player, item: string)
 			
 			player.Character.CharacterData.Equipment:FindFirstChild(object.model_reference.Name):Destroy()
 		end)
-    else
-        print("No Holster.", object)
 	end
 	
 	if object.model_reference then
-		print("Has model reference")
 	end
 
     return "Successfully gave item."
 end
 
 function module.remove_item(player: Player, item: string)
-    print("Removing item:", player.Name, item)
 
     local backpack = player:FindFirstChild("Backpack")
     local character = player.Character
@@ -152,10 +141,8 @@ function module.remove_item(player: Player, item: string)
     end
 
     if removed then
-        print("ItemsService: Removed item", item, "from", player.Name)
         return "Successfully removed item."
     else
-        warn("ItemsService: Item not found:", item)
         return "Item not found."
     end
 end
@@ -167,7 +154,6 @@ function module.start_module()
         local class = require(child)
 
         if type_checker_module.new(types_module.BaseToolClass, class) then
-            print("ItemsService: Checked item class", child.Name)
         else
             warn("ItemsService: Item class", child.Name, "is missing required fields!")
             child:Destroy()

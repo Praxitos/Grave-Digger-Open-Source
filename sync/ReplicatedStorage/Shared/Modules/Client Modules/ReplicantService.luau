@@ -7,11 +7,43 @@ local Players           = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService      = game:GetService("TweenService")
 local InsertService 	= game:GetService("InsertService")
+local Lighting          = game:GetService("Lighting")
+local RunService 		= game:GetService("RunService")
 
 -- Shared references
 local shared    = ReplicatedStorage:WaitForChild("Shared")
 local library   = shared:WaitForChild("Library")
 local utilities = require(library:WaitForChild("Util"))
+
+local concussion_blur = Lighting.Effects.ConcussionBlur
+local concussion_active = false
+local concussion_connection: RBXScriptConnection? = nil
+local heartbeat_sound: Sound? = nil
+local lastHeartbeatTime = 0
+-- Replication tracking
+local MAX_REPLICATION_EVENTS = 300
+module.ReplicationBuffer = {}
+
+local function push_replication_event(eventType, data)
+	table.insert(module.ReplicationBuffer, {
+		Type = eventType,
+		Time = os.clock(),
+		Data = data
+	})
+
+	if #module.ReplicationBuffer > MAX_REPLICATION_EVENTS then
+		table.remove(module.ReplicationBuffer, 1)
+	end
+end
+
+function module.GetReplicationBuffer()
+	return module.ReplicationBuffer
+end
+
+-- Export for easy access
+function module.GetReplicationCount()
+	return #module.ReplicationBuffer
+end
 
 -- Asset folders
 local holsters_root = ReplicatedStorage.Shared.Assets.Guns.Holsters
@@ -35,6 +67,8 @@ local fastcast_module = require(shared.Library.Externals.FastCast)
 
 -- Constants
 local MAX_REIN = 500
+local LOW_HEALTH_THRESHOLD = 100
+local HEARTBEAT_INTERVAL = 1.5
 
 local ICONS = {
 	Golden_Empire_Background = "rbxassetid://17519166341",
@@ -44,6 +78,7 @@ local ICONS = {
 local FLASH_TWEEN_INFO = TweenInfo.new(0.4, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true)
 local FLASH_COLOR      = Color3.fromRGB(220, 50, 50)
 
+-- Replicants
 local replicant_folder = game:GetService("ReplicatedStorage").Shared.Library.Events.Replicant_Communication
 local fastcast_replicant = replicant_folder.FastCast_Connection
 local vfx_replicant = replicant_folder.VFX_Connection
@@ -66,6 +101,18 @@ local overhead_lockicon:  ImageLabel
 
 local local_player = Players.LocalPlayer
 
+-- Blur effect setup
+local Camera = workspace.CurrentCamera
+local blur = Camera:FindFirstChild("blur")
+if blur == nil then
+	blur = Instance.new("BlurEffect")
+	blur.Name = "blur"
+	blur.Size = 0
+	blur.Parent = Camera
+end
+
+local lastHeartbeatTime = 0
+
 -- Overhead sync connections; cleared whenever the player leaves a capture zone
 local overhead_connections: { RBXScriptConnection } = {}
 
@@ -78,14 +125,12 @@ local flash_connections: { [Frame]: RBXScriptConnection } = {}
 local point_cap_team: { [string]: string } = {}
 
 
--- Helpers
-
 local function setup_light(parent: BasePart, player: Player)
 	local light      = Instance.new("PointLight")
 	light.Brightness = 0.5
 	light.Range      = 18
 	light.Parent     = parent
-	
+
 	light.Color = player.TeamColor.Color
 end
 
@@ -150,7 +195,7 @@ local function rebind_ui()
 end
 
 
--- Flash helpers
+
 
 local function start_flash(frame: Frame)
 	if active_flash_tweens[frame] then return end
@@ -225,7 +270,7 @@ local function update_enemy_flash(
 end
 
 
--- Player setup
+
 
 local function setup_holster(player: Player, child: BoolValue)
 	local reference =
@@ -273,11 +318,9 @@ local function remove_holster(player: Player, child: Instance)
 	if existing then existing:Destroy() end
 end
 
-
 local function on_character_added(char: Model, player)
 	local torso = char:FindFirstChild("Torso") or char:WaitForChild("Torso")
 	setup_light(torso, player)
-
 end
 
 local function setup_player(player: Player)
@@ -296,7 +339,7 @@ local function setup_player(player: Player)
 end
 
 
--- Capture point UI
+
 
 local function clear_overhead_connections()
 	for _, conn in ipairs(overhead_connections) do
@@ -510,12 +553,283 @@ local function watch_all_points()
 	end
 end
 
+-- // concussion effects
+local function stop_concussion_effect()
+	if not concussion_active then return end
+	concussion_active = false
 
--- Module entry
+	local concussion_ui = local_player.PlayerGui:WaitForChild("Status"):WaitForChild("Concussion")
+	local lowhealth_imagelabel = concussion_ui.Low_Overlay
+	local painoverlay_imagelabel = concussion_ui.Pain_Overlay
+
+	-- fade-out control
+	local start_time = tick()
+	local FADE_OUT_DURATION = 0.5
+
+	-- keep existing connection running, but switch it into "fade-out mode"
+	if concussion_connection then
+		concussion_connection:Disconnect()
+	end
+
+	concussion_connection = RunService.RenderStepped:Connect(function()
+		local t = tick()
+		local elapsed = t - start_time
+
+		-- 1 → 0
+		local fade_alpha = 1 - math.clamp(elapsed / FADE_OUT_DURATION, 0, 1)
+
+		-- smoothstep easing
+		fade_alpha = fade_alpha * fade_alpha * (3 - 2 * fade_alpha)
+
+		local pulse = math.sin(t * 1.5) / 10
+
+		-- drive everything toward zero
+		local target_intensity = (5 + math.abs(pulse * 50)) * fade_alpha
+		blur.Size = blur.Size + (target_intensity - blur.Size) * 0.15
+
+		if concussion_blur then
+			local target_concussion_blur = (10 + math.abs(pulse * 60)) * fade_alpha
+			concussion_blur.Size = concussion_blur.Size + (target_concussion_blur - concussion_blur.Size) * 0.15
+		end
+
+		-- UI scale collapses back to normal
+		local scale = 1 + ((1.1 - pulse) - 1) * fade_alpha
+		painoverlay_imagelabel.Size = painoverlay_imagelabel.Size:Lerp(
+			UDim2.fromScale(scale, scale),
+			0.15
+		)
+
+		-- fade to invisible
+		lowhealth_imagelabel.ImageTransparency = 1 - fade_alpha
+		painoverlay_imagelabel.ImageTransparency = 1 - fade_alpha
+
+		-- fully done → cleanup
+		if elapsed >= FADE_OUT_DURATION then
+			lowhealth_imagelabel.ImageTransparency = 1
+			painoverlay_imagelabel.ImageTransparency = 1
+
+			blur.Size = 0
+
+			if concussion_blur then
+				concussion_blur.Size = 0
+				concussion_blur.Enabled = false
+			end
+
+			if heartbeat_sound then
+				heartbeat_sound:Stop()
+				heartbeat_sound:Destroy()
+				heartbeat_sound = nil
+			end
+
+			concussion_connection:Disconnect()
+			concussion_connection = nil
+		end
+	end)
+end
+
+local function start_concussion_effect()
+	if concussion_active then return end
+	concussion_active = true
+
+	if concussion_blur then
+		concussion_blur.Enabled = true
+	end
+
+	local concussion_ui = local_player.PlayerGui.Status.Concussion
+	local lowhealth_imagelabel = concussion_ui.Low_Overlay
+	local painoverlay_imagelabel = concussion_ui.Pain_Overlay
+
+	lowhealth_imagelabel.ImageTransparency = 1
+	painoverlay_imagelabel.ImageTransparency = 1
+
+	-- fade-in control
+	local start_time = tick()
+	local FADE_IN_DURATION = 0.6 -- seconds
+
+	concussion_connection = RunService.RenderStepped:Connect(function()
+		local t = tick()
+		local elapsed = t - start_time
+
+		-- smooth ramp from 0 → 1
+		local fade_alpha = math.clamp(elapsed / FADE_IN_DURATION, 0, 1)
+
+		-- easing (optional but recommended)
+		fade_alpha = fade_alpha * fade_alpha * (3 - 2 * fade_alpha) -- smoothstep
+
+		local pulse = math.sin(t * 1.5) / 10
+
+		-- blend pulse intensity with fade-in
+		local target_intensity = (5 + math.abs(pulse * 50)) * fade_alpha
+		blur.Size = blur.Size + (target_intensity - blur.Size) * 0.1
+
+		if concussion_blur then
+			local target_concussion_blur = (10 + math.abs(pulse * 60)) * fade_alpha
+			concussion_blur.Size = concussion_blur.Size + (target_concussion_blur - concussion_blur.Size) * 0.1
+		end
+
+		-- UI fade-in + pulse scaling
+		local scale = 1 + ((1.1 - pulse) - 1) * fade_alpha
+		painoverlay_imagelabel.Size = painoverlay_imagelabel.Size:Lerp(
+			UDim2.fromScale(scale, scale),
+			0.1
+		)
+
+		-- transparency fades OUT (since 1 = invisible)
+		lowhealth_imagelabel.ImageTransparency = 1 - fade_alpha
+		painoverlay_imagelabel.ImageTransparency = 1 - fade_alpha
+
+		-- Heartbeat timing
+		if t - lastHeartbeatTime >= HEARTBEAT_INTERVAL then
+			lastHeartbeatTime = t
+			if heartbeat_sound then
+				heartbeat_sound:Play()
+			end
+		end
+	end)
+end
+
+local function update_concussion_state()
+	local state = local_player:GetAttribute("Concussion") == true
+
+	if state then
+		start_concussion_effect()
+	else
+		stop_concussion_effect()
+	end
+end
+
+-- Initial state
+update_concussion_state()
+
+
+
+local function handle_fastcast_replication(...)
+	local args = {...}
+
+	local player = args[1]
+	if player.Name == local_player.Name then return end
+
+	local origin = args[2]
+	local direction = args[3]
+	local speed = args[4]
+	local cast_data = args[5]
+
+	-- Track event
+	push_replication_event("FastCast", {
+		Player = player.Name,
+		Origin = origin,
+		Direction = direction,
+		Speed = speed
+	})
+
+	local caster, caster_data = utilities.setupFastCast(cast_data)
+	caster:Fire(origin, direction, speed, caster_data)
+end
+
+local function handle_vfx_replication(...)
+	local args = {...}
+
+	local player = args[1]
+	if player.Name == local_player.Name then return end
+
+	local effect = args[2]
+	local CFrame_Value = args[3]
+	local target_tables = args[4]
+	local parent = args[5]
+	local emit_count = args[6] or 10
+	local attach_to_parent = args[7]
+
+	-- Track event
+	push_replication_event("VFX", {
+		Player = player.Name,
+		Effect = effect.Name,
+		EmitCount = emit_count,
+		Attached = attach_to_parent
+	})
+
+	for _, child in pairs(effect:GetDescendants()) do
+		local match = table.find(target_tables, child.Name) 
+			or table.find(target_tables, child.ClassName)
+
+		if not match then continue end
+
+		local clone = child:Clone()
+		local container: Instance = parent
+
+		if attach_to_parent then
+			clone.Parent = parent
+		else
+			local part = Instance.new("Part")
+			part.Size = Vector3.new(0.05, 0.05, 0.05)
+			part.Anchored = true
+			part.CanCollide = false
+			part.Transparency = 1
+			part.Parent = workspace
+
+			part.CFrame = CFrame_Value
+			clone.Parent = part
+			container = part
+		end
+
+		if clone:IsA("ParticleEmitter") then
+			clone.Enabled = true
+			clone:Emit(emit_count)
+
+			local lifetime = clone.Lifetime.Max
+			task.delay(lifetime + 0.1, function()
+				if attach_to_parent then
+					if clone then clone:Destroy() end
+				else
+					if container then container:Destroy() end
+				end
+			end)
+		end
+	end
+end
+
+local function handle_texture_replication(...)
+	local args = {...}
+
+	local player = args[1]
+	if player.Name == local_player.Name then return end
+
+	local part = args[2]
+	local position = args[3]
+	local normal = args[4]
+	local parent = args[5]
+
+	-- Track event
+	push_replication_event("Texture", {
+		Player = player.Name,
+		Texture = part.Name,
+		Position = position
+	})
+
+	local texture_clone = part:Clone()
+	texture_clone.CFrame = CFrame.new(position, position + normal)
+	texture_clone.Parent = parent
+end
+
+local function handle_holster_replication(...)
+	local args = {...}
+
+	local player = args[1]
+	local holster_name = args[2]
+	local is_equipped = args[3]
+
+	-- Track event
+	push_replication_event("Holster", {
+		Player = player.Name,
+		Holster = holster_name,
+		Equipped = is_equipped
+	})
+end
+
+
 
 function module.start_module()
 	rebind_ui()
-	
+
 	fastcast_module.VisualizeCasts = visualize_casts_boolean.Value
 
 	visualize_casts_boolean:GetPropertyChangedSignal("Value"):Connect(function()
@@ -523,11 +837,13 @@ function module.start_module()
 		print("[GameManager] Cast visualization set to", visualize_casts_boolean.Value)
 	end)
 
+	-- Setup existing players
 	for _, player in pairs(Players:GetPlayers()) do
 		setup_player(player)
 	end
 	Players.PlayerAdded:Connect(setup_player)
 
+	-- Bind reinforcement count updates
 	nation_rein_count:GetPropertyChangedSignal("Value"):Connect(function()
 		update_bar(nation_frame, nation_rein_count.Value)
 	end)
@@ -547,105 +863,19 @@ function module.start_module()
 		update_objective(gamemode_config.Gamemode_Type.Value)
 	end)
 
+	-- Rebind UI on character respawn
 	local_player.CharacterAdded:Connect(rebind_ui)
 
+	-- Watch capture points
 	watch_all_points()
-	
-	fastcast_replicant.OnClientEvent:Connect(function(...)
-		local args = {...}
-		local player = args[1]
-		if player.Name == local_player.Name then return end
-		local origin = args[2]
-		local direction = args[3]
-		local speed = args[4]
-		local cast_data = args[5]
-		local caster, caster_data = utilities.setupFastCast(cast_data)
-		local cast = caster:Fire(origin, direction, speed, caster_data)
-	end)
-	
-	vfx_replicant.OnClientEvent:Connect(function(...)
-			local args = {...}
-			
-			local player = args[1]
-			if player.Name == local_player.Name then return end
-			
-			local effect = args[2]
-			local CFrame_Value = args[3]
-			local target_tables = args[4]
-			local parent = args[5]
-			local emit_count = args[6]
-			local attach_to_parent = args[7]
-			
-			
-			
-			emit_count = emit_count or 10
 
-			for _, child in pairs(effect:GetDescendants()) do
+	-- Bind replication event handlers
+	fastcast_replicant.OnClientEvent:Connect(handle_fastcast_replication)
+	vfx_replicant.OnClientEvent:Connect(handle_vfx_replication)
+	texture_replicant.OnClientEvent:Connect(handle_texture_replication)
 
-			local match = table.find(target_tables, child.Name) 
-				or table.find(target_tables, child.ClassName)
-
-			if not match then
-				continue
-			end
-
-			local clone = child:Clone()
-			local container: Instance = parent
-
-			if attach_to_parent then
-				clone.Parent = parent
-			else
-				local part = Instance.new("Part")
-				part.Size = Vector3.new(0.05, 0.05, 0.05)
-				part.Anchored = true
-				part.CanCollide = false
-				part.Transparency = 1
-				part.Parent = workspace
-
-				part.CFrame = CFrame_Value
-
-				clone.Parent = part
-				container = part
-			end
-
-
-			if clone:IsA("ParticleEmitter") then
-				clone.Enabled = true
-				clone:Emit(emit_count)
-
-				-- Cleanup based on lifetime
-				local lifetime = clone.Lifetime.Max
-
-				task.delay(lifetime + 0.1, function()
-					if attach_to_parent then
-						if clone then
-							clone:Destroy()
-						end
-					else
-						if container then
-							container:Destroy()
-						end
-					end
-				end)
-			end
-		end
-	end)
-	
-	texture_replicant.OnClientEvent:Connect(function(...)
-		local args = {...}
-
-		local player = args[1]
-		local part = args[2]
-		local position = args[3]
-		local normal = args[4]
-		local parent = args[5]
-		
-		if player.Name == local_player.Name then return end
-		
-		local texture_clone = part:Clone()
-		texture_clone.CFrame = CFrame.new(position, position + normal)
-		texture_clone.Parent = parent
-	end)
+	-- Listen for changes
+	local_player:GetAttributeChangedSignal("Concussion"):Connect(update_concussion_state)
 end
 
 return module

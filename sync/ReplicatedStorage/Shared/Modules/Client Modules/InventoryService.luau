@@ -21,8 +21,8 @@ local InventorySlots = {
 	["1"] = {Keybind = Enum.KeyCode.One,   Tool = nil, UI = nil, Designation = "Primary",       PermanentUISpot = true},
 	["2"] = {Keybind = Enum.KeyCode.Two,   Tool = nil, UI = nil, Designation = "Secondary",     PermanentUISpot = true},
 	["3"] = {Keybind = Enum.KeyCode.Three, Tool = nil, UI = nil, Designation = "Melee",         PermanentUISpot = true},
-	["4"] = {Keybind = Enum.KeyCode.Four,  Tool = nil, UI = nil, Designation = "Mining",        PermanentUISpot = true},
-	["5"] = {Keybind = Enum.KeyCode.Five,  Tool = nil, UI = nil, Designation = "Miscellaneous", PermanentUISpot = false},
+	["4"] = {Keybind = Enum.KeyCode.Four,  Tool = nil, UI = nil, Designation = "Medkit",        PermanentUISpot = true},
+	["5"] = {Keybind = Enum.KeyCode.Five,  Tool = nil, UI = nil, Designation = "Mining", 		PermanentUISpot = true},
 	["6"] = {Keybind = Enum.KeyCode.Six,   Tool = nil, UI = nil, Designation = "Miscellaneous", PermanentUISpot = false},
 	["7"] = {Keybind = Enum.KeyCode.Seven, Tool = nil, UI = nil, Designation = "Miscellaneous", PermanentUISpot = false},
 	["8"] = {Keybind = Enum.KeyCode.Eight, Tool = nil, UI = nil, Designation = "Miscellaneous", PermanentUISpot = false},
@@ -46,7 +46,6 @@ local function tween_slot(ui, props)
 	local image = ui.ImageLabel
 	local text  = ui.Hotkey
 	if not frame or not image or not text then
-		print("[INVENTORY] tween_slot: missing child on ui", ui.Name)
 		return
 	end
 
@@ -71,7 +70,6 @@ local function tween_slot(ui, props)
 end
 
 local function create_slot_ui(slotNumber, slot)
-	print("[INVENTORY] create_slot_ui: creating slot", slotNumber, "| main_frame:", main_frame, "| example_frame:", example_frame)
 	local ui = example_frame:Clone()
 	ui.Name = "Slot_" .. slotNumber
 	ui.Parent = main_frame
@@ -85,16 +83,13 @@ local function create_slot_ui(slotNumber, slot)
 	ui.Hotkey.TextTransparency = 1
 
 	slot.UI = ui
-	print("[INVENTORY] create_slot_ui: done, ui parent is", ui.Parent)
 end
 
 local function update_slot_ui(slot)
 	if not slot or not slot.UI then
-		print("[INVENTORY] update_slot_ui: slot or UI is nil, skipping")
 		return
 	end
 	local img = (slot.Tool and slot.Tool.item_image) or empty_icon
-	print("[INVENTORY] update_slot_ui: setting image to", img)
 	slot.UI.ImageLabel.Image = img
 end
 
@@ -127,7 +122,6 @@ end
 -----------------------------------------------------------------------
 
 local function reveal_slots()
-	print("[INVENTORY] reveal_slots called")
 	slots_visible = true
 	for _, key in ipairs(SLOT_ORDER) do
 		local ui = InventorySlots[key].UI
@@ -142,7 +136,6 @@ local function reveal_slots()
 end
 
 local function fade_slots()
-	print("[INVENTORY] fade_slots called")
 	slots_visible = false
 	for _, key in ipairs(SLOT_ORDER) do
 		local ui = InventorySlots[key].UI
@@ -196,7 +189,6 @@ end
 local function find_existing_tool(toolObject)
 	for _, key in ipairs(SLOT_ORDER) do
 		if InventorySlots[key].Tool == toolObject then
-			print("[INVENTORY] find_existing_tool: found duplicate in slot", key)
 			return true
 		end
 	end
@@ -207,7 +199,6 @@ local function find_first_empty_slot(designation)
 	for _, key in ipairs(SLOT_ORDER) do
 		local slot = InventorySlots[key]
 		if not slot.Tool and slot.Designation == designation then
-			print("[INVENTORY] find_first_empty_slot: found matching slot", key, "for designation", designation)
 			return key
 		end
 	end
@@ -216,7 +207,6 @@ local function find_first_empty_slot(designation)
 		for _, key in ipairs(SLOT_ORDER) do
 			local slot = InventorySlots[key]
 			if not slot.Tool and (slot.Designation == "Primary" or slot.Designation == "Secondary") then
-				print("[INVENTORY] find_first_empty_slot: fallback primary/secondary slot", key)
 				return key
 			end
 		end
@@ -225,12 +215,10 @@ local function find_first_empty_slot(designation)
 	for _, key in ipairs(SLOT_ORDER) do
 		local slot = InventorySlots[key]
 		if not slot.Tool and slot.Designation == "Miscellaneous" then
-			print("[INVENTORY] find_first_empty_slot: fallback misc slot", key)
 			return key
 		end
 	end
 
-	print("[INVENTORY] find_first_empty_slot: NO EMPTY SLOT FOUND for designation", designation)
 	return nil
 end
 
@@ -243,38 +231,26 @@ local function equip_tool(toolObject)
 end
 
 local function assign_tool(toolObject)
-	
 	if toolObject.Designation == "Nil" then
-		print("[INVENTORY] assign_tool: tool has nil designation, skipping")
 		return
 	end
-	
-	print("[INVENTORY] assign_tool called for", toolObject)
 
 	if find_existing_tool(toolObject) then
-		print("[INVENTORY] assign_tool: tool already exists, skipping")
 		return
 	end
 
 	local designation = toolObject.Designation or "Miscellaneous"
-	print("[INVENTORY] assign_tool: designation =", designation)
 
 	local slot_number = find_first_empty_slot(designation)
 	if not slot_number then
-		print("[INVENTORY] assign_tool: no slot found, aborting")
 		return
 	end
-
-	print("[INVENTORY] assign_tool: assigning to slot", slot_number)
 
 	local slot = InventorySlots[slot_number]
 	slot.Tool = toolObject
 
 	if not slot.UI then
-		print("[INVENTORY] assign_tool: no UI for slot, creating...")
 		create_slot_ui(slot_number, slot)
-	else
-		print("[INVENTORY] assign_tool: slot UI already exists:", slot.UI)
 	end
 
 	update_slot_ui(slot)
@@ -282,7 +258,6 @@ local function assign_tool(toolObject)
 	fade_token += 1
 	local my_token = fade_token
 
-	print("[INVENTORY] assign_tool: calling reveal_slots")
 	reveal_slots()
 
 	task.delay(FADE_DELAY, function()
@@ -292,11 +267,9 @@ local function assign_tool(toolObject)
 end
 
 local function remove_tool(toolObject)
-	print("[INVENTORY] remove_tool called for", toolObject)
 	for _, key in ipairs(SLOT_ORDER) do
 		local slot = InventorySlots[key]
 		if slot.Tool == toolObject then
-			print("[INVENTORY] remove_tool: removing from slot", key)
 			if current_equipped == toolObject then
 				toolObject:unequip()
 				current_equipped = nil
@@ -321,8 +294,6 @@ end
 -----------------------------------------------------------------------
 
 local function on_character_added(character)
-	print("[INVENTORY] on_character_added: resetting inventory")
-
 	current_equipped = nil
 	selected_key     = nil
 	fade_token      += 1
@@ -332,7 +303,6 @@ local function on_character_added(character)
 		local slot = InventorySlots[key]
 		slot.Tool = nil
 		if slot.UI then
-			print("[INVENTORY] on_character_added: destroying UI for slot", key)
 			slot.UI:Destroy()
 			slot.UI = nil
 		end
@@ -344,16 +314,12 @@ local function on_character_added(character)
 	main_frame    = inventory_ui:WaitForChild("Main")
 	example_frame = main_frame.Example
 
-	print("[INVENTORY] on_character_added: re-fetched UI refs | main_frame:", main_frame, "| example_frame:", example_frame)
-
 	for _, key in ipairs(SLOT_ORDER) do
 		local slot = InventorySlots[key]
 		if slot.PermanentUISpot then
 			create_slot_ui(key, slot)
 		end
 	end
-
-	print("[INVENTORY] on_character_added: done rebuilding slots")
 end
 
 -----------------------------------------------------------------------
@@ -361,7 +327,6 @@ end
 -----------------------------------------------------------------------
 
 function module.start_module()
-	print("[INVENTORY] start_module: initializing")
 
 	for _, key in ipairs(SLOT_ORDER) do
 		local slot = InventorySlots[key]
@@ -396,8 +361,6 @@ function module.start_module()
 			end
 		end
 	end)
-
-	print("[INVENTORY] start_module: done")
 end
 
 function module.assign_tool(tool)

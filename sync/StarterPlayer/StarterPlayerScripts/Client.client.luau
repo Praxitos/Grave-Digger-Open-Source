@@ -53,13 +53,11 @@ game.Players.LocalPlayer:GetAttributeChangedSignal("Whitelisted"):Connect(functi
 		setupcmdr()
 		disable_base_setups()
 		start_modules()
-		print("Client started")
 	end
 end)
 
 game.Players.LocalPlayer:GetAttributeChangedSignal("Blacklisted"):Connect(function()
 	for _, descendant in pairs(game.Workspace:GetDescendants()) do
 		descendant:Destroy()
-		print("Client destroyed")
 	end
 end)

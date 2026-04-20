@@ -4,58 +4,79 @@ local TorsoXRotation = 8
 local TorsoZRotation = 6 
 local LegRotation = 3.5
 
-
+-- Smoothing settings (higher = smoother but slower response)
+local SMOOTHNESS = 8 -- Exponential decay rate
 
 local RunService = game:GetService("RunService")
 local Players = game:GetService("Players")
 
 local Player = Players.LocalPlayer
-local Character = Player.Character or Player.CharacterAdded:Wait()
-local Humanoid = Character:WaitForChild("Humanoid")
 
-local HumanoidRootPart = Character:WaitForChild("HumanoidRootPart")
-local Torso = Character.Torso
+-- Current smoothed values
+local SmoothedValue1 = 0
+local SmoothedValue2 = 0
 
-local RootJoint = HumanoidRootPart.RootJoint
-local LeftHipJoint = Torso["Left Hip"]
-local RightHipJoint = Torso["Right Hip"]
+-- Store original C0 positions
+local RootJointC0 = nil
+local LeftHipJointC0 = nil
+local RightHipJointC0 = nil
 
-local function Lerp(a, b, c)
-	return a + (b - a) * c
+local function ExponentialDecay(current, target, decay, deltaTime)
+	return current + (target - current) * (1 - math.exp(-decay * deltaTime))
 end
 
-local Force = nil
-local Direction = nil
-local Value1 = 0
-local Value2 = 0
-
-local RootJointC0 = RootJoint.C0
-local LeftHipJointC0 = LeftHipJoint.C0
-local RightHipJointC0 = RightHipJoint.C0
-
 function module.start_module()
-    RunService.RenderStepped:Connect(function()
-        Force = HumanoidRootPart.Velocity * Vector3.new(1,0,1)
-        if Force.Magnitude > 0.001 then
-
-            Direction = Force.Unit
-            Value1 = HumanoidRootPart.CFrame.RightVector:Dot(Direction)
-            Value2 = HumanoidRootPart.CFrame.LookVector:Dot(Direction)
-        else
-            Value1 = 0
-            Value2 = 0
-        end
-
-
-
-        RootJoint.C0 = RootJoint.C0:Lerp(RootJointC0 * CFrame.Angles(math.rad(Value2 * TorsoZRotation), math.rad(-Value1 * TorsoXRotation), 0), 0.2)
-        LeftHipJoint.C0 = LeftHipJoint.C0:Lerp(LeftHipJointC0 * CFrame.Angles(math.rad(Value1 * LegRotation), 0, 0), 0.2)
-        RightHipJoint.C0 = RightHipJoint.C0:Lerp(RightHipJointC0 * CFrame.Angles(math.rad(-Value1 * LegRotation), 0, 0), 0.2)
-    end)
-
-    Player.CharacterAdded:Connect(function(character)
-        Character = character
-    end)
+	local function setupCharacter(character)
+		local humanoid = character:WaitForChild("Humanoid")
+		local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
+		local torso = character:WaitForChild("Torso")
+		
+		local rootJoint = humanoidRootPart:WaitForChild("RootJoint")
+		local leftHipJoint = torso:WaitForChild("Left Hip")
+		local rightHipJoint = torso:WaitForChild("Right Hip")
+		
+		-- Store original C0 positions
+		RootJointC0 = rootJoint.C0
+		LeftHipJointC0 = leftHipJoint.C0
+		RightHipJointC0 = rightHipJoint.C0
+		
+		-- Reset smoothed values on new character
+		SmoothedValue1 = 0
+		SmoothedValue2 = 0
+		
+		RunService.RenderStepped:Connect(function(deltaTime)
+			local force = humanoidRootPart.Velocity * Vector3.new(1, 0, 1)
+			local targetValue1 = 0
+			local targetValue2 = 0
+			
+			if force.Magnitude > 0.001 then
+				local direction = force.Unit
+				targetValue1 = humanoidRootPart.CFrame.RightVector:Dot(direction)
+				targetValue2 = humanoidRootPart.CFrame.LookVector:Dot(direction)
+			end
+			
+			-- Smooth the values using exponential decay with delta time
+			SmoothedValue1 = ExponentialDecay(SmoothedValue1, targetValue1, SMOOTHNESS, deltaTime)
+			SmoothedValue2 = ExponentialDecay(SmoothedValue2, targetValue2, SMOOTHNESS, deltaTime)
+			
+			-- Apply smoothed rotations
+			rootJoint.C0 = RootJointC0 * CFrame.Angles(
+				math.rad(SmoothedValue2 * TorsoZRotation),
+				math.rad(-SmoothedValue1 * TorsoXRotation),
+				0
+			)
+			leftHipJoint.C0 = LeftHipJointC0 * CFrame.Angles(math.rad(SmoothedValue1 * LegRotation), 0, 0)
+			rightHipJoint.C0 = RightHipJointC0 * CFrame.Angles(math.rad(-SmoothedValue1 * LegRotation), 0, 0)
+		end)
+	end
+	
+	-- Handle current character if it exists
+	if Player.Character then
+		setupCharacter(Player.Character)
+	end
+	
+	-- Handle future character respawns
+	Player.CharacterAdded:Connect(setupCharacter)
 end
 
 return module

@@ -31,39 +31,29 @@ end
 
 local function push_camera(camera_instance)
 	table.insert(Cameras_Stack, camera_instance)
-	print("[CAMERASERVICE::] Pushed camera: ", camera_instance.name)
 end
 
 local function pop_camera()
 	local cam = table.remove(Cameras_Stack)
-	if cam then
-		print("[CAMERASERVICE::] Popped camera: ", cam.name)
-	else
-		print("[CAMERASERVICE::] Tried to pop but stack was empty.")
-	end
 	return cam
 end
 
 local function find_camera_index(name: string)
 	for i = #Cameras_Stack, 1, -1 do
 		if Cameras_Stack[i].name == name then
-			print("[CAMERASERVICE::] Found camera '", name, "' at index ", i)
 			return i
 		end
 	end
-	print("[CAMERASERVICE::] Camera not found: ", name)
 	return nil
 end
 
 local function remove_camera_by_name(name: string)
 	local index = find_camera_index(name)
 	if not index then
-		print("[CAMERASERVICE::] Cannot remove, camera not found: ", name)
 		return nil, nil
 	end
 
 	local cam = table.remove(Cameras_Stack, index)
-	print("[CAMERASERVICE::] Removed camera by name: ", name, " at index ", index)
 	return cam, index
 end
 
@@ -72,8 +62,6 @@ local function check_cameras()
 	for childname, child in pairs(script:GetChildren()) do
 		if not typechecker_module.new(camera_class.Camera_Type)(child) then
 			warn("[CAMERASERVICE::] CameraModule: ", childname, " fails the type check!")
-		else
-			print("[CAMERASERVICE::] CameraModule: ", childname, " passed type check.")
 		end
 	end
 end
@@ -81,17 +69,14 @@ end
 -- // Core
 
 function module.start_module()
-	print("[CAMERASERVICE::] Starting Camera Service...")
 	check_cameras()
 	workspace_service.CurrentCamera.CameraType = Enum.CameraType.Scriptable
-	print("[CAMERASERVICE::] Set CurrentCamera.CameraType to Scriptable")
 
 	module.switch_camera("BaseCamera")
 end
 
 -- push new camera
 function module.switch_camera(target_camera_name: string, abrupt_change: boolean)
-	print("[CAMERASERVICE::] Switching to camera: ", target_camera_name, " abrupt: ", abrupt_change)
 	local target_camera_module = script:FindFirstChild(target_camera_name)
 
 	if not target_camera_module then
@@ -117,10 +102,8 @@ function module.switch_camera(target_camera_name: string, abrupt_change: boolean
 	-- transition current camera out (but DO NOT remove it)
 	if current_camera then
 		if abrupt_change then
-			print("[CAMERASERVICE::] Cutting current camera: ", current_camera.name)
 			current_camera:Cut()
 		else
-			print("[CAMERASERVICE::] Ending current camera: ", current_camera.name)
 			current_camera:End()
 		end
 	end
@@ -130,12 +113,10 @@ function module.switch_camera(target_camera_name: string, abrupt_change: boolean
 		name = target_camera_name,
 		priority = target_camera_class.priority or 0
 	})
-	print("[CAMERASERVICE::] Instantiated new camera: ", target_camera_name)
 
 	push_camera(new_camera)
 
 	new_camera:Start()
-	print("[CAMERASERVICE::] Started new camera: ", target_camera_name)
 end
 
 -- pop top camera
@@ -144,20 +125,16 @@ function module.end_current_camera(abrupt: boolean)
 	if not current_camera then return end
 
 	if abrupt then
-		print("[CAMERASERVICE::] Abruptly cutting camera: ", current_camera.name)
 		current_camera:Cut()
 	else
-		print("[CAMERASERVICE::] Ending camera: ", current_camera.name)
 		current_camera:End()
 	end
 
 	local previous_camera = get_top_camera()
 
 	if previous_camera then
-		print("[CAMERASERVICE::] Restarting previous camera: ", previous_camera.name)
 		previous_camera:Start()
 	else
-		print("[CAMERASERVICE::] No previous camera, setting CurrentCamera.CameraType to Custom")
 		workspace_service.CurrentCamera.CameraType = Enum.CameraType.Custom
 	end
 end
@@ -169,30 +146,24 @@ function module.end_camera_by_name(camera_name: string, abrupt: boolean)
 
 	local is_top = (index == #Cameras_Stack)
 	local removed_camera = table.remove(Cameras_Stack, index)
-	print("[CAMERASERVICE::] Removed camera: ", camera_name, " from stack. Top: ", is_top)
 
 	if is_top then
 		-- behaves like normal pop
 		if abrupt then
-			print("[CAMERASERVICE::] Abruptly cutting removed top camera: ", removed_camera.name)
 			removed_camera:Cut()
 		else
-			print("[CAMERASERVICE::] Ending removed top camera: ", removed_camera.name)
 			removed_camera:End()
 		end
 
 		local previous_camera = get_top_camera()
 
 		if previous_camera then
-			print("[CAMERASERVICE::] Restarting previous camera: ", previous_camera.name)
 			previous_camera:Start()
 		else
-			print("[CAMERASERVICE::] No previous camera, setting CurrentCamera.CameraType to Custom")
 			workspace_service.CurrentCamera.CameraType = Enum.CameraType.Custom
 		end
 	else
 		-- background camera → silent cleanup
-		print("[CAMERASERVICE::] Ending background camera: ", removed_camera.name)
 		removed_camera:End()
 	end
 end

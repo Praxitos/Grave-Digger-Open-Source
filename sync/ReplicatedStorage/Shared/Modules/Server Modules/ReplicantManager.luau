@@ -10,6 +10,12 @@ local vfx_replicant = replicant_folder.VFX_Connection
 local sfx_replicant = replicant_folder.SFX_Connection
 local texture_replicant = replicant_folder.Texture_Connection
 local hit_connection = replicant_folder.Hit_Connection
+local heal_connection = replicant_folder.Heal_Connection
+
+local status_connection = replicant_folder.Parent.Status_Communication.Status_Connection
+
+
+local status_service = require(script.Parent.StatusService)
 
 local function getModelFromInstance(instance: Instance)
 	if not instance then return nil end
@@ -55,6 +61,7 @@ local function getDistanceScaledForce(baseForce: number, distance: number)
 	return math.max(scaled, MIN_FORCE)
 end
 
+
 function module.start_module()
 
 	fastcast_replicant.OnServerEvent:Connect(function(...)
@@ -80,6 +87,7 @@ function module.start_module()
 		local instance = hitData.Instance
 		local direction = hitData.Direction
 
+
 		if not instance or not instance:IsDescendantOf(workspace) then return end
 		if not direction then return end
 
@@ -88,7 +96,9 @@ function module.start_module()
 
 		local hrp = character:FindFirstChild("HumanoidRootPart")
 		if not hrp then return end
-
+		
+		local hit_player = game.Players:GetPlayerFromCharacter(instance.Parent)
+		
 		local forceDir = (direction.Unit + Vector3.new(0, 0.1, 0)).Unit
 
 		local baseForce = knockback_force or 5
@@ -106,8 +116,28 @@ function module.start_module()
 
 		if humanoid and humanoid.Health > 0 then
 			humanoid:TakeDamage(damage or 0)
+			
+			
+			if humanoid.Health < 100 then
+				status_service.give_status(hit_player, "WoundStatus")
+				status_service.give_status(hit_player, "ConcussionStatus")
+			end
 		end
 	end)
+	
+	heal_connection.OnServerEvent:Connect(function(sender, healed, wound)
+		status_service.remove_status(healed, "WoundStatus")
+		healed.Character.Humanoid.Health = 100
+	end)
+	
+	status_connection.OnServerEvent:Connect(function(player, status, enabled: boolean)
+		if enabled then
+			status_service.give_status(player, status)
+		else
+			status_service.remove_status(player, status)
+		end
+	end)
+
 end
 
 return module

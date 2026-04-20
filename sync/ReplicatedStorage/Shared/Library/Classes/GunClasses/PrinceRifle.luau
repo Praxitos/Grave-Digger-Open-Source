@@ -119,7 +119,6 @@ export type PrinceRifle = typeof(setmetatable({} :: {
 
 function PrinceRifle.new(info: Types.BaseToolCreateInfo): PrinceRifle
 	local self = setmetatable(BaseTool.new(info), PrinceRifle)
-
 	self.className   = "PrinceRifle"
 	self.item_image  = "rbxassetid://17496049645"
 	self.Designation = "Primary"
@@ -162,7 +161,7 @@ function PrinceRifle.new(info: Types.BaseToolCreateInfo): PrinceRifle
 		Check = AnimFolder.PrinceRifle_Check,
 	}
 
-	self.damage                  = 25
+	self.damage                  = 105
 	self.Max_Capacity            = 10
 	self.Capacity                = 10
 	self.Ammo_Type               = "8mm Smokeless"

@@ -1,321 +1,438 @@
---!strict
+----------------------
+-- @Praxitos
+-- Animation Handler 
+----------------------
 
---////////////////////////////////////////////////////////
--- Setup
---////////////////////////////////////////////////////////
+-- // Services
+local input_service             = game:GetService("UserInputService")
+local replicatedstorage_service = game:GetService("ReplicatedStorage")
+local run_service               = game:GetService("RunService")
+local player_service            = game:GetService("Players")
 
-local Character = script.Parent
-local Humanoid: Humanoid = Character:WaitForChild("Humanoid")
-local UIS = game:GetService("UserInputService")
-local RunService = game:GetService("RunService")
+-- // Variables
+local local_player = player_service.LocalPlayer
+local character    = script.Parent
+local humanoid: Humanoid = character:WaitForChild("Humanoid")
+local animator: Animator = humanoid:FindFirstChildOfClass("Animator") or Instance.new("Animator")
+animator.Parent = humanoid
 
+local humanoid_root_part = character:WaitForChild("HumanoidRootPart")
 
-local Animations_Folder = game:GetService("ReplicatedStorage")
-	.Shared.Assets.Animations.Character
+local animations_folder = replicatedstorage_service.Shared.Assets.Animations.Character
 
--- Ensure Animator exists
-local Animator: Animator = Humanoid:FindFirstChildOfClass("Animator") or Instance.new("Animator")
-Animator.Parent = Humanoid
+local animations_table = {
+	animations_folder.Idles.Stand_Idle,
+	animations_folder.Walking.Standing.Walk_Forward,
+	animations_folder.Walking.Standing.Walk_Left,
+	animations_folder.Walking.Standing.Walk_Right,
 
---////////////////////////////////////////////////////////
--- Config
---////////////////////////////////////////////////////////
+	animations_folder.Jumping.Jump_Arms,
+	animations_folder.Jumping.Jump_Land,
+	animations_folder.Jumping.Jump_MidAir,
 
-local ANIMS = {
-	Stand_Idle = Animations_Folder.Idles.Stand_Idle.AnimationId,
+	animations_folder.Sprint.Sprint,
+	animations_folder.Sprint.Sprint_Lean,
+	animations_folder.Sprint.Sprinting_Full,
+	animations_folder.Sprint.Sprint_Arms,
+	animations_folder.Sprint.PrinceRifle_Sprint,
+	animations_folder.Sprint.GraceRevolver_Sprint,
 
-	Walk_Forward = Animations_Folder.Walking.Standing.Walk_Forward.AnimationId,
-	Walk_Left    = Animations_Folder.Walking.Standing.Walk_Left.AnimationId,
-	Walk_Right   = Animations_Folder.Walking.Standing.Walk_Right.AnimationId,
-
-	Sprint        = Animations_Folder.Sprint.Sprint.AnimationId,
-	Sprint_Lean   = Animations_Folder.Sprint.Sprint_Lean.AnimationId,
-	Sprint_Arms   = Animations_Folder.Sprint.Sprint_Arms.AnimationId,
-	Sprint_Full   = Animations_Folder.Sprint.Sprinting_Full.AnimationId,
-
-	PrinceRifle_Sprint = Animations_Folder.Sprint.PrinceRifle_Sprint.AnimationId,
-	GraceRevolver_Sprint = Animations_Folder.Sprint.GraceRevolver_Sprint.AnimationId,
-
-	Jump = "rbxassetid://125750702",
-	Fall = "rbxassetid://180436148",
+	animations_folder.Walking.Crouch.CrouchWalk_Forward,
+	animations_folder.Walking.Crouch.CrouchWalk_Left,
+	animations_folder.Walking.Crouch.CrouchWalk_Right,
+	animations_folder.Idles.Crouch_Idle,
+	animations_folder.Walking.Crouch.Crouch_Arms
 }
 
---////////////////////////////////////////////////////////
--- State
---////////////////////////////////////////////////////////
+local loaded_animations: {[string]: AnimationTrack} = {}
+local directional_table = { Forward = false, Left = false, Right = false }
 
-local Tracks: {[string]: AnimationTrack} = {}
+local active_base: AnimationTrack? = nil
+local active_overlays: {[string]: AnimationTrack} = {}
 
-local ActiveTracks = {
-	Base = nil :: AnimationTrack?,
-	Overlay = {} :: {[string]: AnimationTrack}
-}
+local is_airborne = false
+local crouching = false
 
-local Current_Directions = {
-	W = false,
-	A = false,
-	S = false,
-	D = false,
-}
+local last_move_time = 0
 
-local CurrentSpeed = 1
-local currentSprintOverlay: string? = nil
+-- HIP ADJUSTMENT VARIABLES
+local left_hip: Motor6D?
+local right_hip: Motor6D?
+local hip_adjustment_enabled = true
+local current_hip_offset = 0
+local target_hip_offset = 0
+local hip_adjustment_speed = 0.15
 
---////////////////////////////////////////////////////////
--- Animation Loading
---////////////////////////////////////////////////////////
+-- Store original C1 values to apply offsets relative to them
+local left_hip_original_c1: CFrame?
+local right_hip_original_c1: CFrame?
 
-local function loadAnimation(name: string, id: string): AnimationTrack
-	local anim = Instance.new("Animation")
-	anim.Name = name
-	anim.AnimationId = id
+local ORIGINAL_HIP_HEIGHT = humanoid.HipHeight 
+--------------------------------------------------
+-- LOAD
+--------------------------------------------------
+local function load_animations()
+	for _, animation in pairs(animations_table) do
+		if not animation then
+			warn("[LOAD] NIL animation reference")
+			continue
+		end
 
-	local track = Animator:LoadAnimation(anim)
+		local track = animator:LoadAnimation(animation)
 
-	if name == "Stand_Idle" then
-		track.Priority = Enum.AnimationPriority.Idle
-	elseif string.find(name, "Walk") or name == "Sprint" then
-		track.Priority = Enum.AnimationPriority.Movement
-	else
-		track.Priority = Enum.AnimationPriority.Action
-	end
+		if string.find(animation.Name, "Jump") or string.find(animation.Name, "Sprint") then
+			track.Priority = Enum.AnimationPriority.Action
+		else
+			track.Priority = Enum.AnimationPriority.Movement
+		end
 
-	return track
-end
+		if animation.Name == "Jump_MidAir" then
+			track.Looped = true
+		end
 
-for name, id in pairs(ANIMS) do
-	Tracks[name] = loadAnimation(name, id)
-end
-
---////////////////////////////////////////////////////////
--- Base Animation Control
---////////////////////////////////////////////////////////
-
-local function playBase(name: string, fade: number?)
-	local track = Tracks[name]
-	if not track then return end
-	if ActiveTracks.Base == track then return end
-
-	if ActiveTracks.Base then
-		ActiveTracks.Base:Stop(fade or 0.2)
-	end
-
-	track:Play(fade or 0.2)
-	ActiveTracks.Base = track
-end
-
-local function setBaseSpeed(speed: number)
-	if ActiveTracks.Base then
-		ActiveTracks.Base:AdjustSpeed(speed)
+		loaded_animations[animation.Name] = track
 	end
 end
 
---////////////////////////////////////////////////////////
--- Overlay Control
---////////////////////////////////////////////////////////
-
-local function playOverlay(name: string, fade: number?)
-	if ActiveTracks.Overlay[name] then return end
-
-	local track = Tracks[name]
-	if not track then return end
-
-	track:Play(fade or 0.25)
-	ActiveTracks.Overlay[name] = track
-end
-
-local function stopOverlay(name: string, fade: number?)
-	local track = ActiveTracks.Overlay[name]
-	if not track then return end
-
-	track:Stop(fade or 0.25)
-	ActiveTracks.Overlay[name] = nil
-end
-
-local function clearOverlays(fade: number?)
-	for name, track in pairs(ActiveTracks.Overlay) do
-		track:Stop(fade or 0.25)
-		ActiveTracks.Overlay[name] = nil
+--------------------------------------------------
+-- HIP INITIALIZATION
+--------------------------------------------------
+local function initialize_hips()
+	local torso = character:FindFirstChild("Torso") or character:FindFirstChild("UpperTorso")
+	if not torso then
+		warn("[HIP] Could not find Torso or UpperTorso")
+		hip_adjustment_enabled = false
+		return
 	end
-	currentSprintOverlay = nil
+
+	left_hip = torso:FindFirstChild("Left Hip")
+	right_hip = torso:FindFirstChild("Right Hip")
+
+	if not left_hip or not right_hip then
+		warn("[HIP] Could not find Left Hip or Right Hip Motor6D")
+		hip_adjustment_enabled = false
+		return
+	end
+
+	if not (left_hip:IsA("Motor6D") and right_hip:IsA("Motor6D")) then
+		warn("[HIP] Left Hip or Right Hip is not a Motor6D")
+		hip_adjustment_enabled = false
+		return
+	end
+
+	-- Store original C1 positions to calculate offsets from
+	left_hip_original_c1 = left_hip.C1
+	right_hip_original_c1 = right_hip.C1
 end
 
---////////////////////////////////////////////////////////
--- Input Tracking
---////////////////////////////////////////////////////////
+--------------------------------------------------
+-- HIP ADJUSTMENT
+--------------------------------------------------
+local function set_target_hip_offset(offset: number)
+	if not hip_adjustment_enabled or not left_hip or not right_hip then
+		return
+	end
 
-UIS.InputBegan:Connect(function(input, gp)
-	if gp then return end
+	target_hip_offset = offset
+end
 
-	if input.KeyCode == Enum.KeyCode.W then Current_Directions.W = true end
-	if input.KeyCode == Enum.KeyCode.A then Current_Directions.A = true end
-	if input.KeyCode == Enum.KeyCode.S then Current_Directions.S = true end
-	if input.KeyCode == Enum.KeyCode.D then Current_Directions.D = true end
-end)
+local function update_hip_offset(delta_time: number)
+	if not hip_adjustment_enabled or not left_hip or not right_hip or not left_hip_original_c1 or not right_hip_original_c1 then
+		return
+	end
 
-UIS.InputEnded:Connect(function(input, gp)
-	if gp then return end
+	-- If already at target, do nothing
+	if math.abs(current_hip_offset - target_hip_offset) < 0.001 then
+		return
+	end
 
-	if input.KeyCode == Enum.KeyCode.W then Current_Directions.W = false end
-	if input.KeyCode == Enum.KeyCode.A then Current_Directions.A = false end
-	if input.KeyCode == Enum.KeyCode.S then Current_Directions.S = false end
-	if input.KeyCode == Enum.KeyCode.D then Current_Directions.D = false end
-end)
+	-- Interpolate towards target offset
+	local offset_change = (target_hip_offset - current_hip_offset) * math.min(delta_time / hip_adjustment_speed, 1)
+	current_hip_offset = current_hip_offset + offset_change
 
---////////////////////////////////////////////////////////
--- Sprint Animation Resolver (FIXED)
---////////////////////////////////////////////////////////
+	local left_new_pos = left_hip_original_c1.Position + Vector3.new(0, current_hip_offset, 0)
+	local right_new_pos = right_hip_original_c1.Position + Vector3.new(0, current_hip_offset, 0)
 
-local function detectSprintOverlay(): string
-	local attr = Character:GetAttribute("Sprint_Animation")
+	-- Preserve rotation while updating position
+	local left_c1_rot_x, left_c1_rot_y, left_c1_rot_z = left_hip_original_c1:ToEulerAnglesXYZ()
+	local right_c1_rot_x, right_c1_rot_y, right_c1_rot_z = right_hip_original_c1:ToEulerAnglesXYZ()
 
-	if attr then
-		local name = attr .. "_Sprint"
-		if Tracks[name] then
-			return name
+	left_hip.C1 = CFrame.new(left_new_pos) * CFrame.Angles(left_c1_rot_x, left_c1_rot_y, left_c1_rot_z)
+	right_hip.C1 = CFrame.new(right_new_pos) * CFrame.Angles(right_c1_rot_x, right_c1_rot_y, right_c1_rot_z)
+	
+	humanoid.HipHeight = ORIGINAL_HIP_HEIGHT + current_hip_offset
+end
+
+--------------------------------------------------
+-- BASE
+--------------------------------------------------
+local function play_base(name: string, fade: number?)
+	local track = loaded_animations[name]
+	if not track then 
+		warn("[BASE] Animation '" .. name .. "' not found in loaded_animations")
+		return 
+	end
+
+	if active_base == track and track.IsPlaying then
+		return
+	end
+
+	if active_base then
+		active_base:Stop(fade or 0.15)
+	end
+
+	track:Play(fade or 0.15)
+	active_base = track
+end
+
+--------------------------------------------------
+-- OVERLAYS
+--------------------------------------------------
+local function play_overlay(name: string, fade: number?)
+	local track = loaded_animations[name]
+	if not track then 
+		warn("[OVERLAY] Animation '" .. name .. "' not found in loaded_animations")
+		return 
+	end
+
+	if active_overlays[name] and active_overlays[name].IsPlaying then
+		return
+	end
+
+	track:Play(fade or 0.15)
+	active_overlays[name] = track
+end
+
+local function stop_overlay(name: string, fade: number?)
+	local track = active_overlays[name]
+	if not track then 
+		return 
+	end
+
+	track:Stop(fade or 0.15)
+	active_overlays[name] = nil
+end
+
+local function stop_overlays_except(keep_list: {[string]: boolean})
+	for name, track in pairs(active_overlays) do
+		if not keep_list[name] then
+			track:Stop(0.15)
+			active_overlays[name] = nil
 		end
 	end
+end
 
+local function clear_overlays()
+	for name, track in pairs(active_overlays) do
+		track:Stop(0.15)
+	end
+	active_overlays = {}
+end
+
+--------------------------------------------------
+-- SPRINT
+--------------------------------------------------
+local function get_sprint_overlay_name(): string
+	local attr = character:GetAttribute("Sprint_Animation")
+	if attr then
+		local fullName = attr .. "_Sprint"
+		if loaded_animations[fullName] then
+			return fullName
+		end
+	end
 	return "Sprint_Arms"
 end
 
-
---////////////////////////////////////////////////////////
--- Animation Full Stopper
---////////////////////////////////////////////////////////
-
-local function stop_animations()
-	-- // stop all animations playing on the humanoid
-	for _, track in pairs(Humanoid:GetPlayingAnimationTracks()) do
-		track:Stop()
-	end
-end
-
---////////////////////////////////////////////////////////
--- Movement Logic
---////////////////////////////////////////////////////////
-
-local function handleMovement(speed: number)
-	if speed <= 0.1 then
-		clearOverlays(0.3)
-		playBase("Stand_Idle", 0.25)
-		CurrentSpeed = 1
-		return
+--------------------------------------------------
+-- MOVEMENT
+--------------------------------------------------
+local function update_movement(speed: number)
+	if is_airborne then 
+		return 
 	end
 
-	local walkspeed = Humanoid.WalkSpeed
+	local moving = speed > 1 and humanoid.MoveDirection.Magnitude > 0.1
 
-	-- WALKING
-	if walkspeed < 17 then
-		clearOverlays(0.25)
-
-		if Current_Directions.S and not Current_Directions.W then
-			playBase("Walk_Forward", 0.2) -- replace if you add backward anim
-		elseif Current_Directions.A and not Current_Directions.W then
-			playBase("Walk_Left", 0.2)
-		elseif Current_Directions.D and not Current_Directions.W then
-			playBase("Walk_Right", 0.2)
-		else
-			playBase("Walk_Forward", 0.2)
-		end
-
-		local ratio = math.clamp(speed / walkspeed, 0, 1)
-		local targetSpeed = 0.9 + (ratio * 0.2)
-
-		CurrentSpeed += (targetSpeed - CurrentSpeed) * 0.06
-		setBaseSpeed(CurrentSpeed)
-		return
+	if moving then
+		last_move_time = tick()
 	end
 
-	-- SPRINT BASE
-	if speed >= 20 then
-		playBase("Sprint", 0.2)
-	else
-		clearOverlays(0.25)
-		return
+	if tick() - last_move_time < 0.1 then
+		moving = true
 	end
 
-	-- Lean
-	if walkspeed >= 17 then
-		playOverlay("Sprint_Lean", 0.3)
-	else
-		stopOverlay("Sprint_Lean", 0.3)
-	end
+	-- IDLE
+	if not moving then
+		if crouching then
+			play_base("Crouch_Idle")
+			set_target_hip_offset(-0.85)
 
-	-- Arms (FIXED switching)
-	if walkspeed >= 22 then
-		local animName = detectSprintOverlay()
-
-		if currentSprintOverlay ~= animName then
-			if currentSprintOverlay then
-				stopOverlay(currentSprintOverlay, 0.3)
+			if not active_overlays["Crouch_Arms"] 
+				or not active_overlays["Crouch_Arms"].IsPlaying then
+				play_overlay("Crouch_Arms")
 			end
 
-			playOverlay(animName, 0.3)
-			currentSprintOverlay = animName
+			stop_overlays_except({ Crouch_Arms = true })
+		else
+			play_base("Stand_Idle")
+			set_target_hip_offset(0)
+			clear_overlays()
 		end
-	else
-		if currentSprintOverlay then
-			stopOverlay(currentSprintOverlay, 0.3)
-			currentSprintOverlay = nil
-		end
+		return
 	end
 
-	-- Full
-	if walkspeed >= 24 then
-		playOverlay("Sprint_Full", 0.3)
-	else
-		stopOverlay("Sprint_Full", 0.3)
+	-- CROUCH MOVE
+	if crouching then
+		set_target_hip_offset(-0.5)
+		stop_overlays_except({ Crouch_Arms = true })
+
+		if not active_overlays["Crouch_Arms"] then
+			play_overlay("Crouch_Arms")
+		end
+
+		if directional_table.Forward then
+			play_base("CrouchWalk_Forward")
+		elseif directional_table.Left then
+			play_base("CrouchWalk_Left")
+		elseif directional_table.Right then
+			play_base("CrouchWalk_Right")
+		else
+			play_base("CrouchWalk_Forward")
+		end
+
+		return
 	end
 
-	-- Speed scaling
-	local ratio = math.clamp(speed / walkspeed, 0, 1)
-	local targetSpeed = 1 + (ratio * 0.1)
+	-- WALK
+	if speed < 13 then
+		set_target_hip_offset(0)
+		stop_overlays_except({})
 
-	CurrentSpeed += (targetSpeed - CurrentSpeed) * 0.05
-	setBaseSpeed(CurrentSpeed)
+		if directional_table.Forward then
+			play_base("Walk_Forward")
+		elseif directional_table.Left then
+			play_base("Walk_Left")
+		elseif directional_table.Right then
+			play_base("Walk_Right")
+		end
+
+		return
+	end
+
+	-- SPRINT LEAN
+	if speed < 17 then
+		set_target_hip_offset(0)
+		stop_overlays_except({ Sprint_Lean = true })
+		play_overlay("Sprint_Lean")
+		return
+	end
+
+	-- FULL SPRINT
+	set_target_hip_offset(0)
+	local sprint_overlay = get_sprint_overlay_name()
+
+	stop_overlays_except({
+		Sprint_Lean = true,
+		Sprinting_Full = true,
+		[sprint_overlay] = true
+	})
+
+	play_overlay("Sprint_Lean")
+	play_overlay("Sprinting_Full")
+	play_overlay(sprint_overlay)
 end
 
---////////////////////////////////////////////////////////
--- Movement Sampling (FIXED)
---////////////////////////////////////////////////////////
+--------------------------------------------------
+-- INIT
+--------------------------------------------------
+load_animations()
+initialize_hips()
 
-RunService.RenderStepped:Connect(function()
-	local root = Humanoid.RootPart
-	if not root then return end
+--------------------------------------------------
+-- CONNECTIONS
+--------------------------------------------------
 
-	local velocity = root.Velocity
-	local horizontal = Vector3.new(velocity.X, 0, velocity.Z).Magnitude
+character:GetAttributeChangedSignal("Crouching"):Connect(function()
+	crouching = character:GetAttribute("Crouching") == true
 
-	handleMovement(horizontal)
-end)
-
---////////////////////////////////////////////////////////
--- State Events
---////////////////////////////////////////////////////////
-
-Humanoid.Jumping:Connect(function()
-	clearOverlays(0.2)
-	playBase("Jump", 0.15)
-end)
-
-Humanoid.FreeFalling:Connect(function()
-	clearOverlays(0.25)
-	playBase("Fall", 0.2)
-end)
-
-Humanoid.Died:Connect(function()
-	if ActiveTracks.Base then
-		ActiveTracks.Base:Stop(0)
+	if active_base then
+		active_base:Stop(0)
+		active_base = nil
 	end
 
-	for _, track in pairs(ActiveTracks.Overlay) do
-		track:Stop(0)
+	clear_overlays()
+
+	local speed = humanoid.MoveDirection.Magnitude * humanoid.WalkSpeed
+	update_movement(speed)
+end)
+
+run_service.RenderStepped:Connect(function()
+	local delta_time = run_service.RenderStepped:Wait()
+
+	local speed = humanoid.MoveDirection.Magnitude * humanoid.WalkSpeed
+	update_movement(speed)
+
+	update_hip_offset(delta_time)
+end)
+
+humanoid.StateChanged:Connect(function(_, new_state)
+	if new_state == Enum.HumanoidStateType.Jumping then
+		is_airborne = true
+		set_target_hip_offset(0)
+		clear_overlays()
+		play_overlay("Jump_Arms")
+
+	elseif new_state == Enum.HumanoidStateType.Freefall then
+		is_airborne = true
+		play_overlay("Jump_MidAir")
+
+	elseif new_state == Enum.HumanoidStateType.Landed then
+		is_airborne = false
+
+		stop_overlay("Jump_MidAir")
+		stop_overlay("Jump_Arms")
+
+		play_base("Jump_Land")
+
+		task.delay(0.2, function()
+			if not is_airborne then
+				active_base = nil
+			end
+		end)
 	end
 end)
 
---////////////////////////////////////////////////////////
--- Init
---////////////////////////////////////////////////////////
+input_service.InputBegan:Connect(function(io, gp)
+	if gp then return end
 
-playBase("Stand_Idle", 0.2)
+	if io.KeyCode == Enum.KeyCode.W then 
+		directional_table.Forward = true
+	end
+	if io.KeyCode == Enum.KeyCode.A then 
+		directional_table.Left = true
+	end
+	if io.KeyCode == Enum.KeyCode.D then 
+		directional_table.Right = true
+	end
+end)
+
+input_service.InputEnded:Connect(function(io, gp)
+	if gp then return end
+
+	if io.KeyCode == Enum.KeyCode.W then 
+		directional_table.Forward = false
+	end
+	if io.KeyCode == Enum.KeyCode.A then 
+		directional_table.Left = false
+	end
+	if io.KeyCode == Enum.KeyCode.D then 
+		directional_table.Right = false
+	end
+end)
+
+humanoid.Died:Connect(function()
+	if active_base then 
+		active_base:Stop(0) 
+	end
+	clear_overlays()
+end)

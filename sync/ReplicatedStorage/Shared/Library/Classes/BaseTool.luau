@@ -186,6 +186,7 @@ end
 
 function BaseTool:equip()
 	if not self.tool then return end
+	self.Equipped = true
 
 	local character = LOCAL_PLAYER.Character
 	if not character then return end
@@ -194,12 +195,15 @@ function BaseTool:equip()
 	if not humanoid then return end
 
 	humanoid:EquipTool(self.tool)
-
+	if self._on_equip then
+		self:_on_equip() 
+	end
+	
 	if self.RegisteredAnimations then
 		local draw = self.RegisteredAnimations.Draw
 		local hold = self.RegisteredAnimations.Hold
 		if draw then draw:Play() end
-		if hold then hold:Play() end
+		if hold then draw.Stopped:Connect(function() if hold and self.tool and self.tool.Parent == character then hold:Play() end end) end
 	end
 
 	if self.model_reference then
@@ -226,14 +230,10 @@ function BaseTool:equip()
 			end
 		end
 	end)
-
-	if self._on_equip then
-		self:_on_equip()
-	end
 end
 
 function BaseTool:unequip()
-	if not self.tool then return end
+	if not self.tool then return end	
 
 	local character = LOCAL_PLAYER.Character
 	if not character then return end
@@ -562,7 +562,8 @@ function BaseTool:_startAimTracking()
 	if not character then return end
 
 	local torso = character:FindFirstChild("Torso")
-	if not torso then return end
+	local root  = character:FindFirstChild("HumanoidRootPart")
+	if not torso or not root then return end
 
 	local leftShoulder  = torso:FindFirstChild("Left Shoulder")
 	local rightShoulder = torso:FindFirstChild("Right Shoulder")
@@ -576,17 +577,41 @@ function BaseTool:_startAimTracking()
 	local pitchLimit = (self :: any).AIM_PITCH_LIMIT or AIM_PITCH_LIMIT
 	local lerpAlpha  = (self :: any).AIM_LERP_ALPHA  or AIM_LERP_ALPHA
 
-	self._aimConnection = RunService.PreSimulation:Connect(function()
+	self._aimConnection = RunService.RenderStepped:Connect(function()
 		if not self.Aiming then return end
-		local pitch    = workspace.CurrentCamera.CFrame:ToEulerAnglesYXZ()
-		local aimAngle = math.clamp(pitch, -pitchLimit, pitchLimit)
 
-		leftShoulder.C0 = leftShoulder.C0:Lerp(
-			self._leftShoulderC0  * CFrame.Angles(0, 0, -aimAngle), lerpAlpha
-		)
-		rightShoulder.C0 = rightShoulder.C0:Lerp(
-			self._rightShoulderC0 * CFrame.Angles(0, 0,  aimAngle), lerpAlpha
-		)
+		local camCF = workspace.CurrentCamera.CFrame
+		local isFirstPerson = LOCAL_PLAYER:GetAttribute("FirstPerson") == true
+
+		if isFirstPerson then
+			local localLook = root.CFrame:VectorToObjectSpace(camCF.LookVector)
+			local pitch = math.asin(localLook.Y)
+			local aimAngle = math.clamp(pitch, -pitchLimit, pitchLimit)
+
+			leftShoulder.C0 = leftShoulder.C0:Lerp(
+				self._leftShoulderC0 * CFrame.Angles(0, 0, -aimAngle),
+				lerpAlpha
+			)
+
+			rightShoulder.C0 = rightShoulder.C0:Lerp(
+				self._rightShoulderC0 * CFrame.Angles(0, 0, aimAngle),
+				lerpAlpha
+			)
+
+		else
+			local pitch = camCF:ToEulerAnglesYXZ()
+			local aimAngle = math.clamp(pitch, -pitchLimit, pitchLimit)
+
+			leftShoulder.C0 = leftShoulder.C0:Lerp(
+				self._leftShoulderC0 * CFrame.Angles(0, 0, -aimAngle),
+				lerpAlpha
+			)
+
+			rightShoulder.C0 = rightShoulder.C0:Lerp(
+				self._rightShoulderC0 * CFrame.Angles(0, 0, aimAngle),
+				lerpAlpha
+			)
+		end
 	end)
 end
 
@@ -898,7 +923,7 @@ end
 --------------------------------------------------------------------------------
 
 function BaseTool:activate()
-	error(self.className .. " missing activate()")
+	
 end
 
 function BaseTool:reload()

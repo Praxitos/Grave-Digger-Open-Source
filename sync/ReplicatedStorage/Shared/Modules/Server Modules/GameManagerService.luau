@@ -332,13 +332,11 @@ end
 -- Module entry
 
 function module.start_module()
-	print("[GameManager] Running initial startup!")
 	
 	fastcast_module.VisualizeCasts = visualize_casts_boolean.Value
 	
 	visualize_casts_boolean:GetPropertyChangedSignal("Value"):Connect(function()
 		fastcast_module.VisualizeCasts = visualize_casts_boolean.Value
-		print("[GameManager] Cast visualization set to", visualize_casts_boolean.Value)
 	end)
 	
 	
@@ -369,7 +367,6 @@ function module.start_module()
 		carve_air_block(map)
 		setup_capture_point(point, map)
 		table.insert(active_points, point)
-		print("[GameManager] Placed map at point:", point.Name)
 	end
 
 	-- Ticket drain loop

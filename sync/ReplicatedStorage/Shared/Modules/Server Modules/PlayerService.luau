@@ -5,6 +5,8 @@ local Players = game:GetService("Players")
 local Animations_Folder = game:GetService("ReplicatedStorage").Shared.Assets.Animations.Character.Walking.Standing.Walk_Forward
 local Ragdoll_Status = require(game:GetService("ReplicatedStorage").Shared.Library.Classes.StatusClasses.RagdollStatus)
 local testing_boolean = game.ReplicatedStorage.Shared.Library.Configuration.Game_Variables.Testing_Boolean
+local status_service = require(script.Parent.StatusService)
+
 
 local shirt_clothing = script.Shirt
 local pants_clothing = script.Pants
@@ -43,6 +45,10 @@ local function setup_characterdata(character: Model)
 	local Equipment_Folder = Instance.new("Folder")
 	Equipment_Folder.Name = "Equipment"
 	Equipment_Folder.Parent = folder
+	
+	local Wound_Folder = Instance.new("Folder")
+	Wound_Folder.Name = "Wounds"
+	Wound_Folder.Parent = folder
 end
 
 local function fetch_hair_accessories(player: Player)
@@ -128,9 +134,12 @@ end
 local function handle_character(player: Player, character: Model, ragdoll_object)
 	setup_characterdata(character)
 
-	local humanoid = character:WaitForChild("Humanoid")
+	local humanoid:Humanoid = character:WaitForChild("Humanoid")
 	humanoid.BreakJointsOnDeath = false
 
+	humanoid.MaxHealth = 200
+	humanoid.Health = 200
+	
 	task.defer(function()
 		apply_full_appearance(character, player)
 	end)
@@ -164,6 +173,7 @@ local function setup_player(player: Player)
 
 	player.CharacterAdded:Connect(function(character)
 		handle_character(player, character, ragdoll_object)
+		status_service.remove_all_statuses(player)
 	end)
 
 	if player.Character then
