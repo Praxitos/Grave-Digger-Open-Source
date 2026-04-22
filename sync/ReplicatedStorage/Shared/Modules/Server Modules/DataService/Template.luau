@@ -8,9 +8,9 @@ return {
 
 		},
 
-		["Input Options"] = {
-			["Free Look"] = "Enum.KeyCode.LeftAlt",
-			["Shoulder Switch"] = "Enum.KeyCode.Q",
+		["Input Options"] = { 
+			["Free Look"] = "Enum.KeyCode.LeftControl",
+			["Shoulder Switch"] = "Enum.KeyCode.F",
 			["First Person"] = "Enum.KeyCode.V",
 			["Sprint"] = "Enum.KeyCode.LeftShift",
 			["Crouch"] = "Enum.KeyCode.C",
