@@ -10,7 +10,7 @@ local LocalPlayer = Players.LocalPlayer
 
 -- // Dynamic character refs
 local Character = nil
-local Humanoid = nil
+local Humanoid: Humanoid = nil
 local RootPart = nil
 local Animator = nil
 
@@ -144,7 +144,7 @@ local function sprintLoop()
 			break
 		end
 
-		task.wait(0.03)  -- matches RenderStepped ~0.03s
+		task.wait(0.03) 
 	end
 
 	LoopRunning = false
@@ -200,6 +200,26 @@ function module.start_module()
 		elseif input.KeyCode == Enum.KeyCode.D then
 			KeyStates.Right = false
 		end
+	end)
+	
+	Humanoid.StateChanged:Connect(function(old, new)
+		if new == Enum.HumanoidStateType.Jumping then
+			Humanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping, false)
+			print("jumped")
+			
+			task.delay(1, function()
+				print("enabled")
+				Humanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping, true)
+			end)
+		end
+	end)
+	
+	Humanoid.HealthChanged:Connect(function()
+		Humanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping, false)
+
+		task.delay(1, function()
+			Humanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping, true)
+		end)
 	end)
 end
 
