@@ -141,9 +141,9 @@ local function fade_slots()
 		local ui = InventorySlots[key].UI
 		if ui then
 			tween_slot(ui, {
-				BackgroundTransparency = 1,
-				ImageTransparency      = 1,
-				TextTransparency       = 1,
+				BackgroundTransparency = 0.9,
+				ImageTransparency      = 0.9,
+				TextTransparency       = 0.9,
 			})
 		end
 	end
