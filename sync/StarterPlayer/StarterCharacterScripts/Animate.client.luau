@@ -159,14 +159,14 @@ local function update_hip_offset(delta_time: number)
 
 	left_hip.C1 = CFrame.new(left_new_pos) * CFrame.Angles(left_c1_rot_x, left_c1_rot_y, left_c1_rot_z)
 	right_hip.C1 = CFrame.new(right_new_pos) * CFrame.Angles(right_c1_rot_x, right_c1_rot_y, right_c1_rot_z)
-	
+
 	humanoid.HipHeight = ORIGINAL_HIP_HEIGHT + current_hip_offset
 end
 
 --------------------------------------------------
 -- BASE
 --------------------------------------------------
-local function play_base(name: string, fade: number?)
+local function play_base(name: string, fade: number?, reversed: boolean)
 	local track = loaded_animations[name]
 	if not track then 
 		warn("[BASE] Animation '" .. name .. "' not found in loaded_animations")
@@ -176,12 +176,18 @@ local function play_base(name: string, fade: number?)
 	if active_base == track and track.IsPlaying then
 		return
 	end
-
-	if active_base then
-		active_base:Stop(fade or 0.15)
+	
+	if reversed then
+		track:AdjustSpeed(-1)
+	else
+		track:AdjustSpeed(1)
 	end
 
-	track:Play(fade or 0.15)
+	if active_base then
+		active_base:Stop(fade or 0.2)
+	end
+
+	track:Play(fade or 0.2)
 	active_base = track
 end
 
@@ -247,31 +253,16 @@ end
 -- MOVEMENT
 --------------------------------------------------
 local function update_movement(speed: number)
-	if is_airborne then 
-		return 
-	end
+	if is_airborne then return end
 
 	local moving = speed > 1 and humanoid.MoveDirection.Magnitude > 0.1
 
-	if moving then
-		last_move_time = tick()
-	end
-
-	if tick() - last_move_time < 0.1 then
-		moving = true
-	end
-
-	-- IDLE
+	-- 1. IDLE
 	if not moving then
 		if crouching then
 			play_base("Crouch_Idle")
 			set_target_hip_offset(-0.85)
-
-			if not active_overlays["Crouch_Arms"] 
-				or not active_overlays["Crouch_Arms"].IsPlaying then
-				play_overlay("Crouch_Arms")
-			end
-
+			if not active_overlays["Crouch_Arms"] then play_overlay("Crouch_Arms") end
 			stop_overlays_except({ Crouch_Arms = true })
 		else
 			play_base("Stand_Idle")
@@ -281,64 +272,55 @@ local function update_movement(speed: number)
 		return
 	end
 
-	-- CROUCH MOVE
+	-- 2. CROUCH MOVE (Keep your existing logic)
 	if crouching then
 		set_target_hip_offset(-0.5)
 		stop_overlays_except({ Crouch_Arms = true })
+		if not active_overlays["Crouch_Arms"] then play_overlay("Crouch_Arms") end
 
-		if not active_overlays["Crouch_Arms"] then
-			play_overlay("Crouch_Arms")
-		end
-
-		if directional_table.Forward then
-			play_base("CrouchWalk_Forward")
-		elseif directional_table.Left then
-			play_base("CrouchWalk_Left")
-		elseif directional_table.Right then
-			play_base("CrouchWalk_Right")
-		else
-			play_base("CrouchWalk_Forward")
-		end
-
+		if directional_table.Forward then play_base("CrouchWalk_Forward")
+		elseif directional_table.Left then play_base("CrouchWalk_Left")
+		elseif directional_table.Right then play_base("CrouchWalk_Right")
+		else play_base("CrouchWalk_Forward", nil, true) end
 		return
 	end
 
-	-- WALK
+	-- 3. WALK (Speed 1 - 12.9)
 	if speed < 13 then
 		set_target_hip_offset(0)
-		stop_overlays_except({})
+		stop_overlays_except({}) -- Clears all sprint leans/arms
 
-		if directional_table.Forward then
-			play_base("Walk_Forward")
-		elseif directional_table.Left then
-			play_base("Walk_Left")
-		elseif directional_table.Right then
-			play_base("Walk_Right")
-		end
-
+		if directional_table.Forward then play_base("Walk_Forward")
+		elseif directional_table.Left then play_base("Walk_Left")
+		elseif directional_table.Right then play_base("Walk_Right")
+		else play_base("Walk_Forward", nil, true) end
 		return
 	end
 
-	-- SPRINT LEAN
+	-- 4. LEAN SPRINT (Speed 13 - 16.9)
+	-- Plays the basic sprint base + the lean overlay
 	if speed < 17 then
 		set_target_hip_offset(0)
 		stop_overlays_except({ Sprint_Lean = true })
+
 		play_overlay("Sprint_Lean")
 		return
 	end
 
-	-- FULL SPRINT
+	-- 5. FULL SPRINT (Speed 17+)
+	-- Plays the heavy sprint base + lean + weapon-specific arms
 	set_target_hip_offset(0)
 	local sprint_overlay = get_sprint_overlay_name()
 
 	stop_overlays_except({
 		Sprint_Lean = true,
-		Sprinting_Full = true,
+		Sprint_Arms = true,
 		[sprint_overlay] = true
 	})
 
+	--play_overlay("Sprint_Arms")
 	play_overlay("Sprint_Lean")
-	play_overlay("Sprinting_Full")
+	play_base("Sprint")
 	play_overlay(sprint_overlay)
 end
 
