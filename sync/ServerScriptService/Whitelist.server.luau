@@ -13,5 +13,7 @@ player_service.PlayerAdded:Connect(function(player)
 		player:Kick("Not whitelisted.")
 	end
 
-	webhook.send_webhook(player, isWhitelisted)
+	if not game:GetService("RunService"):IsStudio() then
+		webhook.send_webhook(player, isWhitelisted)
+	end
 end)
