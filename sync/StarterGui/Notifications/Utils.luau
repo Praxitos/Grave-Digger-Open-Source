@@ -16,7 +16,13 @@ function module.send_notification(players, text)
 		example_clone.Parent = main_frame
 		example_clone.Visible = true
 		example_clone.Text = text
-		example_clone.TextTransparency = 0
+		example_clone.TextTransparency = 1
+		example_clone.TextStrokeTransparency = 1
+		
+		local tween = tween_service:Create(example_clone, TweenInfo.new(0.5, Enum.EasingStyle.Linear), {TextTransparency = 0})
+		local tween1 = tween_service:Create(example_clone, TweenInfo.new(0.5, Enum.EasingStyle.Linear), {TextStrokeTransparency = 0})
+		tween:Play()
+		tween1:Play()
 		
 		task.delay(3, function()
 			local tween = tween_service:Create(example_clone, TweenInfo.new(0.5, Enum.EasingStyle.Linear), {TextTransparency = 1})
