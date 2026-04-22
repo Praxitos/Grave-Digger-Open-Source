@@ -23,7 +23,7 @@ local CAM_SMOOTH_SPEED    = 24
 
 local DEFAULT_DISTANCE    = 5.5
 local DEFAULT_SIDE        = 1.3
-local DEFAULT_HEIGHT      = 1.7
+local DEFAULT_HEIGHT      = 1.6
 local SHOULDER_LERP_SPEED = 15
 
 local SPRINT_DISTANCE_ADD = 0
@@ -128,14 +128,57 @@ local function getHeadPos(character: Model): Vector3
 end
 
 local function exitFreeLook(self, char)
-	self.IsFreeLook               = false
-	self.FreeLookPhase            = "orbiting"
-	InputService.MouseBehavior    = Enum.MouseBehavior.LockCenter
+	self.IsFreeLook = false
+	self.FreeLookPhase = "orbiting"
+	self.FreeLookRMB = false
+
+	local humanoid = char and char:FindFirstChildOfClass("Humanoid")
+	local root = char and char:FindFirstChild("HumanoidRootPart")
+
+	if root then
+		local _, y, _ = Camera.CFrame:ToOrientation()
+		self.CameraYaw = y
+		self.FreeLookYaw = y
+
+		root.CFrame = CFrame.new(root.Position) * CFrame.Angles(0, y, 0)
+	end
+
+	if humanoid then
+		humanoid.AutoRotate = true
+	end
+
 	InputService.MouseIconEnabled = false
-	local h = char and char:FindFirstChildOfClass("Humanoid")
-	if h then h.AutoRotate = false end
-	LocalPlayer.PlayerGui.Aiming.Regular_Crosshair.Visible = true
-	LocalPlayer:SetAttribute("FreeLook", nil)
+	InputService.MouseBehavior = Enum.MouseBehavior.LockCenter
+
+	local gui = LocalPlayer:FindFirstChild("PlayerGui")
+	if gui then
+	    local aiming = gui:FindFirstChild("Aiming")
+	    if aiming and aiming:FindFirstChild("Regular_Crosshair") then
+	        aiming.Regular_Crosshair.Visible = true
+	    end
+	end
+
+	LocalPlayer:SetAttribute("FreeLook", false)
+end
+
+local function updateMouseBehavior(self)
+	if self.IsFirstPerson then
+		InputService.MouseBehavior = Enum.MouseBehavior.LockCenter
+		InputService.MouseIconEnabled = false
+		return
+	end
+
+	if self.IsFreeLook then
+		if self.FreeLookRMB then
+			InputService.MouseBehavior = Enum.MouseBehavior.LockCurrentPosition
+		else
+			InputService.MouseBehavior = Enum.MouseBehavior.Default
+		end
+		return
+	end
+
+	InputService.MouseBehavior = Enum.MouseBehavior.LockCenter
+	InputService.MouseIconEnabled = false
 end
 
 ------------------------------------------------------------------------
@@ -409,9 +452,7 @@ function BaseCamera:Start()
 			if gameProcessed then return end
 
 			if input.UserInputType == Enum.UserInputType.MouseButton2 then
-				if self.IsFreeLook and self.FreeLookPhase == "orbiting" then
 					self.FreeLookRMB = true
-				end
 				return
 			end
 
@@ -448,23 +489,29 @@ function BaseCamera:Start()
 				self.IsFreeLook = not self.IsFreeLook
 
 				if self.IsFreeLook then
-					self.FreeLookPhase            = "panning"
-					self.FreeLookYaw              = self.CameraYaw
-					self.FreeLookPitch            = self.CameraPitch
-					InputService.MouseBehavior    = Enum.MouseBehavior.Default
-					InputService.MouseIconEnabled = true
-					if humanoid then humanoid.AutoRotate = true end
-					
-					showCharacter(char)
-				else
-					exitFreeLook(self, char)
-					local r = char and char:FindFirstChild("HumanoidRootPart")
-					if r then self.CameraYaw = yawFromLook(r.CFrame.LookVector) end
-					self.CameraPitch = 0
+					self.IsFreeLook = true
+					self.FreeLookPhase = "panning"
 
-					if self.IsFirstPerson then
-						tweenFirstPerson(char, true )
+					if not self.IsFreeLook then
+						self.FreeLookYaw   = self.CameraYaw
+						self.FreeLookPitch = self.CameraPitch
 					end
+
+					local headPos = getHeadPos(char)
+					local rotation = CFrame.Angles(0, self.FreeLookYaw, 0) * CFrame.Angles(self.FreeLookPitch, 0, 0)
+
+					self.FreeLookTargetPos = headPos - rotation.LookVector * FREELOOK_ORBIT_DISTANCE
+
+					-- IMPORTANT: start from actual camera position
+					self.SmoothedPos = Camera.CFrame.Position
+
+					InputService.MouseBehavior = Enum.MouseBehavior.Default
+					InputService.MouseIconEnabled = true
+
+					humanoid.AutoRotate = not self.IsFreeLook
+				else
+					local char = LocalPlayer.Character
+					exitFreeLook(self, char)
 				end
 
 			elseif keyMatches(pressedName, firstPersonKey) then
@@ -492,13 +539,9 @@ function BaseCamera:Start()
 		------------------------------------------------------------------------
 		-- RMB released
 		------------------------------------------------------------------------
-		InputService.InputEnded:Connect(function(input, gameProcessed)
+		InputService.InputEnded:Connect(function(input)
 			if input.UserInputType == Enum.UserInputType.MouseButton2 then
-				if self.FreeLookRMB then
-					self.FreeLookRMB              = false
-					InputService.MouseBehavior    = Enum.MouseBehavior.LockCenter
-					InputService.MouseIconEnabled = false
-				end
+				self.FreeLookRMB = false
 			end
 		end),
 
@@ -606,7 +649,8 @@ end
 function BaseCamera:Update(dt: number)
 
 	local sensitivity = getOffset("rotationSpeed", 0.25) * 1.35
-	local delta       = InputService:GetMouseDelta()
+	local delta = InputService:GetMouseDelta()
+	self._mouseDelta = delta
 
 	------------------------------------------------------------------------
 	-- Death spectate
@@ -646,7 +690,7 @@ function BaseCamera:Update(dt: number)
 
 	local heightOffset = getOffset("heightOffset", DEFAULT_HEIGHT)
 	local sensitivity  = getOffset("rotationSpeed", 0.25)
-	local delta        = InputService:GetMouseDelta()
+	local delta        = self._mouseDelta
 
 	--------------------------------------------------------------------
 	-- 1. Mouse delta → angles
@@ -655,8 +699,10 @@ function BaseCamera:Update(dt: number)
 	if self.IsFreeLook then
 		humanoid.AutoRotate = true
 		if self.FreeLookPhase == "orbiting" then
-			self.FreeLookYaw   += math.rad(-delta.X * sensitivity)
-			self.FreeLookPitch += math.rad(-delta.Y * sensitivity)
+			local freeLookSensitivity = sensitivity * 1.2
+
+			self.FreeLookYaw += math.rad(-delta.X * freeLookSensitivity)
+			self.FreeLookPitch += math.rad(-delta.Y * freeLookSensitivity)
 			self.FreeLookPitch  = math.clamp(self.FreeLookPitch, PITCH_MIN, PITCH_MAX)
 		end
 	else
@@ -664,8 +710,9 @@ function BaseCamera:Update(dt: number)
 		self.CameraYaw   += math.rad(-delta.X * sensitivity)
 		self.CameraPitch += math.rad(-delta.Y * sensitivity)
 		self.CameraPitch  = math.clamp(self.CameraPitch, PITCH_MIN, PITCH_MAX)
-		self.FreeLookYaw   = self.CameraYaw
-		self.FreeLookPitch = self.CameraPitch
+		local look = Camera.CFrame.LookVector
+		self.FreeLookYaw = math.atan2(-look.X, -look.Z)
+		self.FreeLookPitch = math.asin(look.Y)
 	end
 
 	-- Decay recoil
@@ -678,12 +725,21 @@ function BaseCamera:Update(dt: number)
 	activePitch = math.clamp(activePitch, PITCH_MIN, PITCH_MAX)
 	activeYaw   += self.RecoilYaw
 	
-	if not self.IsFreeLook then
-		local curYaw    = yawFromLook(root.CFrame.LookVector)
-		local diff      = math.atan2(math.sin(self.CameraYaw - curYaw), math.cos(self.CameraYaw - curYaw))
-		local turnSpeed = getOffset("characterTurnSpeed", 24)
-		root.CFrame     = CFrame.new(root.Position)
-			* CFrame.Angles(0, curYaw + diff * math.clamp(turnSpeed * dt, 0, 1), 0)
+	if self.IsFreeLook then
+		humanoid.AutoRotate = true
+	else
+		humanoid.AutoRotate = false
+
+		local yaw = self.CameraYaw
+		local current = root.CFrame
+		local targetYaw = self.CameraYaw
+		local currentYaw = yawFromLook(root.CFrame.LookVector)
+
+		local diff = math.atan2(math.sin(targetYaw - currentYaw), math.cos(targetYaw - currentYaw))
+
+		if math.abs(diff) > 0.01 then
+			root.CFrame = CFrame.new(root.Position) * CFrame.Angles(0, targetYaw, 0)
+		end
 	end
 
 	--------------------------------------------------------------------
@@ -745,22 +801,25 @@ function BaseCamera:Update(dt: number)
 		end
 
 		if self.FreeLookPhase == "panning" then
-			local orbitPos = headPos - rotation.LookVector * FREELOOK_ORBIT_DISTANCE
+			local headPos = getHeadPos(character)
+			local rotation = CFrame.Angles(0, self.FreeLookYaw, 0) * CFrame.Angles(self.FreeLookPitch, 0, 0)
+
+			self.FreeLookTargetPos = headPos - rotation.LookVector * FREELOOK_ORBIT_DISTANCE
+
 			self.SmoothedPos = self.SmoothedPos:Lerp(
-				orbitPos,
-				math.clamp(FREELOOK_PAN_SPEED * dt, 0, 1)
+				self.FreeLookTargetPos,
+				math.clamp(10 * dt, 0, 1)
 			)
 
-			if (self.SmoothedPos - orbitPos).Magnitude < FREELOOK_PAN_THRESHOLD then
-				self.SmoothedPos   = orbitPos
+			if (self.SmoothedPos - self.FreeLookTargetPos).Magnitude < 0.1 then
+				self.SmoothedPos = self.FreeLookTargetPos
 				self.FreeLookPhase = "orbiting"
-				self.FreeLookYaw   = activeYaw
-				self.FreeLookPitch = activePitch
 			end
 
 			Camera.CFrame = CFrame.new(self.SmoothedPos)
-				* CFrame.Angles(0, activeYaw, 0)
-				* CFrame.Angles(activePitch, 0, 0)
+				* CFrame.Angles(0, self.FreeLookYaw, 0)
+				* CFrame.Angles(self.FreeLookPitch, 0, 0)
+
 			return
 		end
 
@@ -800,15 +859,9 @@ function BaseCamera:Update(dt: number)
 	--------------------------------------------------------------------
 	-- 10. Smooth + apply
 	--------------------------------------------------------------------
-	local alpha = math.clamp(CAM_SMOOTH_SPEED * dt, 0, 1)
+	local alpha = 1 - math.exp(-CAM_SMOOTH_SPEED * dt)
 
-	-- Increase responsiveness when moving to eliminate high-speed jitter
-	if humanoid.MoveDirection.Magnitude > 0 then
-		alpha = math.clamp((CAM_SMOOTH_SPEED + (humanoid.WalkSpeed * 1.5)) * dt, 0, 1)
-	end
-
-	-- Prevent the camera from "vibrating" when nearly at the target
-	if (self.SmoothedPos - finalPos).Magnitude < 0.01 then
+	if self.IsFreeLook then
 		self.SmoothedPos = finalPos
 	else
 		self.SmoothedPos = self.SmoothedPos:Lerp(finalPos, alpha)
@@ -817,6 +870,8 @@ function BaseCamera:Update(dt: number)
 	Camera.CFrame = CFrame.new(self.SmoothedPos)
 		* CFrame.Angles(0, activeYaw, 0)
 		* CFrame.Angles(activePitch, 0, 0)
+	
+	updateMouseBehavior(self)
 	
 end
 	
