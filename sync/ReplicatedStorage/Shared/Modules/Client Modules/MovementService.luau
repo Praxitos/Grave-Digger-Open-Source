@@ -180,8 +180,6 @@ function module.start_module()
 			else
 				Character:SetAttribute("Crouching", true)
 				resetSpeed()
-
-				print("Crouching anim played")
 			end
 		end
 	end)
