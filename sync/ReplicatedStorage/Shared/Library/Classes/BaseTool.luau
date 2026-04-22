@@ -218,6 +218,8 @@ function BaseTool:equip()
 			task.wait(1)
 			self:_stopAllExcept()
 		else
+			if not self.Equipped then return end
+			
 			if self.Aiming then
 				local aimTrack = self:_aimTrack()
 				if aimTrack and not aimTrack.IsPlaying then
