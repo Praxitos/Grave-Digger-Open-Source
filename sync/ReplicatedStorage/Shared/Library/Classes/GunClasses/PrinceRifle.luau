@@ -206,7 +206,7 @@ end
 
 function PrinceRifle:_getKeyBindings()
 	local base = BaseTool._getKeyBindings(self)
-	base.AltMode = Enum.KeyCode.F
+	base.AltMode = Enum.KeyCode.Q
 	return base
 end
 
