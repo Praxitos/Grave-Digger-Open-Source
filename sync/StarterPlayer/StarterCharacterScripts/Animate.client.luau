@@ -1,6 +1,6 @@
 ----------------------
 -- @Praxitos
--- Animation Handler 
+-- Animation Handler
 ----------------------
 
 -- // Services
@@ -13,8 +13,12 @@ local player_service            = game:GetService("Players")
 local local_player = player_service.LocalPlayer
 local character    = script.Parent
 local humanoid: Humanoid = character:WaitForChild("Humanoid")
-local animator: Animator = humanoid:FindFirstChildOfClass("Animator") or Instance.new("Animator")
-animator.Parent = humanoid
+
+local animator: Animator = humanoid:FindFirstChildOfClass("Animator")
+if not animator then
+	animator = Instance.new("Animator")
+	animator.Parent = humanoid
+end
 
 local humanoid_root_part = character:WaitForChild("HumanoidRootPart")
 
@@ -45,38 +49,37 @@ local animations_table = {
 }
 
 local loaded_animations: {[string]: AnimationTrack} = {}
+
 local directional_table = { Forward = false, Left = false, Right = false }
 
 local active_base: AnimationTrack? = nil
 local active_overlays: {[string]: AnimationTrack} = {}
 
+local current_base_name: string? = nil
+local current_state = nil
+
 local is_airborne = false
 local crouching = false
 
-local last_move_time = 0
-
--- HIP ADJUSTMENT VARIABLES
+-- hip system
 local left_hip: Motor6D?
 local right_hip: Motor6D?
 local hip_adjustment_enabled = true
 local current_hip_offset = 0
 local target_hip_offset = 0
-local hip_adjustment_speed = 0.15
+local hip_adjustment_speed = 0.12
 
--- Store original C1 values to apply offsets relative to them
 local left_hip_original_c1: CFrame?
 local right_hip_original_c1: CFrame?
 
-local ORIGINAL_HIP_HEIGHT = humanoid.HipHeight 
+local ORIGINAL_HIP_HEIGHT = humanoid.HipHeight
+
 --------------------------------------------------
--- LOAD
+-- LOAD ANIMATIONS
 --------------------------------------------------
 local function load_animations()
 	for _, animation in pairs(animations_table) do
-		if not animation then
-			warn("[LOAD] NIL animation reference")
-			continue
-		end
+		if not animation then continue end
 
 		local track = animator:LoadAnimation(animation)
 
@@ -95,12 +98,11 @@ local function load_animations()
 end
 
 --------------------------------------------------
--- HIP INITIALIZATION
+-- HIP INIT
 --------------------------------------------------
 local function initialize_hips()
 	local torso = character:FindFirstChild("Torso") or character:FindFirstChild("UpperTorso")
 	if not torso then
-		warn("[HIP] Could not find Torso or UpperTorso")
 		hip_adjustment_enabled = false
 		return
 	end
@@ -109,258 +111,226 @@ local function initialize_hips()
 	right_hip = torso:FindFirstChild("Right Hip")
 
 	if not left_hip or not right_hip then
-		warn("[HIP] Could not find Left Hip or Right Hip Motor6D")
 		hip_adjustment_enabled = false
 		return
 	end
 
-	if not (left_hip:IsA("Motor6D") and right_hip:IsA("Motor6D")) then
-		warn("[HIP] Left Hip or Right Hip is not a Motor6D")
-		hip_adjustment_enabled = false
-		return
-	end
-
-	-- Store original C1 positions to calculate offsets from
 	left_hip_original_c1 = left_hip.C1
 	right_hip_original_c1 = right_hip.C1
 end
 
 --------------------------------------------------
--- HIP ADJUSTMENT
+-- STATE
+--------------------------------------------------
+local function set_state(new_state)
+	if current_state == new_state then
+		return false
+	end
+	current_state = new_state
+	return true
+end
+
+--------------------------------------------------
+-- HIP UPDATE
 --------------------------------------------------
 local function set_target_hip_offset(offset: number)
-	if not hip_adjustment_enabled or not left_hip or not right_hip then
-		return
-	end
-
 	target_hip_offset = offset
 end
 
-local function update_hip_offset(delta_time: number)
-	if not hip_adjustment_enabled or not left_hip or not right_hip or not left_hip_original_c1 or not right_hip_original_c1 then
-		return
-	end
+local function update_hip_offset(dt: number)
+	if not hip_adjustment_enabled or not left_hip or not right_hip then return end
+	if not left_hip_original_c1 or not right_hip_original_c1 then return end
 
-	-- If already at target, do nothing
-	if math.abs(current_hip_offset - target_hip_offset) < 0.001 then
-		return
-	end
+	local alpha = math.min(dt / hip_adjustment_speed, 1)
+	current_hip_offset += (target_hip_offset - current_hip_offset) * alpha
 
-	-- Interpolate towards target offset
-	local offset_change = (target_hip_offset - current_hip_offset) * math.min(delta_time / hip_adjustment_speed, 1)
-	current_hip_offset = current_hip_offset + offset_change
+	local left_new = left_hip_original_c1.Position + Vector3.new(0, current_hip_offset, 0)
+	local right_new = right_hip_original_c1.Position + Vector3.new(0, current_hip_offset, 0)
 
-	local left_new_pos = left_hip_original_c1.Position + Vector3.new(0, current_hip_offset, 0)
-	local right_new_pos = right_hip_original_c1.Position + Vector3.new(0, current_hip_offset, 0)
+	local lx, ly, lz = left_hip_original_c1:ToEulerAnglesXYZ()
+	local rx, ry, rz = right_hip_original_c1:ToEulerAnglesXYZ()
 
-	-- Preserve rotation while updating position
-	local left_c1_rot_x, left_c1_rot_y, left_c1_rot_z = left_hip_original_c1:ToEulerAnglesXYZ()
-	local right_c1_rot_x, right_c1_rot_y, right_c1_rot_z = right_hip_original_c1:ToEulerAnglesXYZ()
-
-	left_hip.C1 = CFrame.new(left_new_pos) * CFrame.Angles(left_c1_rot_x, left_c1_rot_y, left_c1_rot_z)
-	right_hip.C1 = CFrame.new(right_new_pos) * CFrame.Angles(right_c1_rot_x, right_c1_rot_y, right_c1_rot_z)
+	left_hip.C1 = CFrame.new(left_new) * CFrame.Angles(lx, ly, lz)
+	right_hip.C1 = CFrame.new(right_new) * CFrame.Angles(rx, ry, rz)
 
 	humanoid.HipHeight = ORIGINAL_HIP_HEIGHT + current_hip_offset
 end
 
 --------------------------------------------------
--- BASE
+-- BASE / OVERLAY
 --------------------------------------------------
 local function play_base(name: string, fade: number?, reversed: boolean)
-	local track = loaded_animations[name]
-	if not track then 
-		warn("[BASE] Animation '" .. name .. "' not found in loaded_animations")
-		return 
-	end
-
-	if active_base == track and track.IsPlaying then
+	if current_base_name == name and active_base and active_base.IsPlaying then
 		return
 	end
-	
-	if reversed then
-		track:AdjustSpeed(-1)
-	else
-		track:AdjustSpeed(1)
-	end
+
+	local track = loaded_animations[name]
+	if not track then return end
+
+	fade = fade or 0.18
+
+	track:AdjustSpeed(reversed and -1 or 1)
 
 	if active_base then
-		active_base:Stop(fade or 0.2)
+		active_base:Stop(fade)
 	end
 
-	track:Play(fade or 0.2)
+	track:Play(fade)
 	active_base = track
+	current_base_name = name
 end
 
---------------------------------------------------
--- OVERLAYS
---------------------------------------------------
 local function play_overlay(name: string, fade: number?)
 	local track = loaded_animations[name]
-	if not track then 
-		warn("[OVERLAY] Animation '" .. name .. "' not found in loaded_animations")
-		return 
-	end
+	if not track then return end
 
 	if active_overlays[name] and active_overlays[name].IsPlaying then
 		return
 	end
 
-	track:Play(fade or 0.15)
+	track:Play(fade or 0.12)
 	active_overlays[name] = track
 end
 
 local function stop_overlay(name: string, fade: number?)
 	local track = active_overlays[name]
-	if not track then 
-		return 
-	end
+	if not track then return end
 
-	track:Stop(fade or 0.15)
+	track:Stop(fade or 0.12)
 	active_overlays[name] = nil
 end
 
-local function stop_overlays_except(keep_list: {[string]: boolean})
-	for name, track in pairs(active_overlays) do
-		if not keep_list[name] then
-			track:Stop(0.15)
-			active_overlays[name] = nil
-		end
-	end
-end
-
 local function clear_overlays()
-	for name, track in pairs(active_overlays) do
-		track:Stop(0.15)
+	for _, track in pairs(active_overlays) do
+		track:Stop(0.12)
 	end
 	active_overlays = {}
 end
 
 --------------------------------------------------
--- SPRINT
---------------------------------------------------
-local function get_sprint_overlay_name(): string
-	local attr = character:GetAttribute("Sprint_Animation")
-	if attr then
-		local fullName = attr .. "_Sprint"
-		if loaded_animations[fullName] then
-			return fullName
-		end
-	end
-	return "Sprint_Arms"
-end
-
---------------------------------------------------
--- MOVEMENT
+-- MOVEMENT (FIXED STABILITY)
 --------------------------------------------------
 local function update_movement(speed: number)
 	if is_airborne then return end
 
-	local moving = speed > 1 and humanoid.MoveDirection.Magnitude > 0.1
+	local moving = humanoid.MoveDirection.Magnitude > 0.1 and speed > 1
 
-	-- 1. IDLE
 	if not moving then
-		if crouching then
-			play_base("Crouch_Idle")
-			set_target_hip_offset(-0.85)
-			if not active_overlays["Crouch_Arms"] then play_overlay("Crouch_Arms") end
-			stop_overlays_except({ Crouch_Arms = true })
-		else
-			play_base("Stand_Idle")
-			set_target_hip_offset(0)
-			clear_overlays()
+		local target = crouching and "CROUCH_IDLE" or "IDLE"
+
+		if set_state(target) then
+			if crouching then
+				play_base("Crouch_Idle")
+				set_target_hip_offset(-0.85)
+				clear_overlays()
+				play_overlay("Crouch_Arms")
+			else
+				play_base("Stand_Idle")
+				set_target_hip_offset(0)
+				clear_overlays()
+			end
 		end
 		return
 	end
 
-	-- 2. CROUCH MOVE (Keep your existing logic)
+	
 	if crouching then
-		set_target_hip_offset(-0.5)
-		stop_overlays_except({ Crouch_Arms = true })
-		if not active_overlays["Crouch_Arms"] then play_overlay("Crouch_Arms") end
+		if set_state("CROUCH_WALK") then
+			set_target_hip_offset(-0.85)
+			clear_overlays()
+			play_overlay("Crouch_Arms")
 
-		if directional_table.Forward then play_base("CrouchWalk_Forward")
-		elseif directional_table.Left then play_base("CrouchWalk_Left")
-		elseif directional_table.Right then play_base("CrouchWalk_Right")
-		else play_base("CrouchWalk_Forward", nil, true) end
+			if directional_table.Forward then
+				play_base("CrouchWalk_Forward")
+			elseif directional_table.Left then
+				play_base("CrouchWalk_Left")
+			elseif directional_table.Right then
+				play_base("CrouchWalk_Right")
+			else
+				play_base("CrouchWalk_Forward")
+			end
+		end
 		return
 	end
-
-	-- 3. WALK (Speed 1 - 12.9)
+	
 	if speed < 13 then
-		set_target_hip_offset(0)
-		stop_overlays_except({}) -- Clears all sprint leans/arms
+		if set_state("WALK") then
+			set_target_hip_offset(0)
+			clear_overlays()
 
-		if directional_table.Forward then play_base("Walk_Forward")
-		elseif directional_table.Left then play_base("Walk_Left")
-		elseif directional_table.Right then play_base("Walk_Right")
-		else play_base("Walk_Forward", nil, true) end
+			if directional_table.Forward then
+				play_base("Walk_Forward")
+			elseif directional_table.Left then
+				play_base("Walk_Left")
+			elseif directional_table.Right then
+				play_base("Walk_Right")
+			else
+				play_base("Walk_Forward")
+			end
+		end
 		return
 	end
 
-	-- 4. LEAN SPRINT (Speed 13 - 16.9)
-	-- Plays the basic sprint base + the lean overlay
-	if speed < 17 then
-		set_target_hip_offset(0)
-		stop_overlays_except({ Sprint_Lean = true })
-
-		play_overlay("Sprint_Lean")
-		return
+	-- SPRINT
+	if speed >= 17 then
+		if set_state("SPRINT") then
+			clear_overlays()
+			play_base("Sprint")
+			play_overlay("Sprint_Lean")
+		end
 	end
-
-	-- 5. FULL SPRINT (Speed 17+)
-	-- Plays the heavy sprint base + lean + weapon-specific arms
-	set_target_hip_offset(0)
-	local sprint_overlay = get_sprint_overlay_name()
-
-	stop_overlays_except({
-		Sprint_Lean = true,
-		Sprint_Arms = true,
-		[sprint_overlay] = true
-	})
-
-	--play_overlay("Sprint_Arms")
-	play_overlay("Sprint_Lean")
-	play_base("Sprint")
-	play_overlay(sprint_overlay)
 end
 
 --------------------------------------------------
--- INIT
+-- INPUT
 --------------------------------------------------
-load_animations()
-initialize_hips()
+input_service.InputBegan:Connect(function(io, gp)
+	if gp then return end
+
+	if io.KeyCode == Enum.KeyCode.W then directional_table.Forward = true end
+	if io.KeyCode == Enum.KeyCode.A then directional_table.Left = true end
+	if io.KeyCode == Enum.KeyCode.D then directional_table.Right = true end
+end)
+
+input_service.InputEnded:Connect(function(io, gp)
+	if gp then return end
+
+	if io.KeyCode == Enum.KeyCode.W then directional_table.Forward = false end
+	if io.KeyCode == Enum.KeyCode.A then directional_table.Left = false end
+	if io.KeyCode == Enum.KeyCode.D then directional_table.Right = false end
+end)
 
 --------------------------------------------------
--- CONNECTIONS
+-- CROUCH
 --------------------------------------------------
-
 character:GetAttributeChangedSignal("Crouching"):Connect(function()
 	crouching = character:GetAttribute("Crouching") == true
+
+	current_state = nil
+	current_base_name = nil
+	clear_overlays()
 
 	if active_base then
 		active_base:Stop(0)
 		active_base = nil
 	end
-
-	clear_overlays()
-
-	local speed = humanoid.MoveDirection.Magnitude * humanoid.WalkSpeed
-	update_movement(speed)
 end)
 
-run_service.RenderStepped:Connect(function()
-	local delta_time = run_service.RenderStepped:Wait()
-
+--------------------------------------------------
+-- LOOP
+--------------------------------------------------
+run_service.RenderStepped:Connect(function(dt)
 	local speed = humanoid.MoveDirection.Magnitude * humanoid.WalkSpeed
 	update_movement(speed)
-
-	update_hip_offset(delta_time)
+	update_hip_offset(dt)
 end)
 
+--------------------------------------------------
+-- HUMANOID STATES
+--------------------------------------------------
 humanoid.StateChanged:Connect(function(_, new_state)
 	if new_state == Enum.HumanoidStateType.Jumping then
 		is_airborne = true
-		set_target_hip_offset(0)
 		clear_overlays()
 		play_overlay("Jump_Arms")
 
@@ -370,51 +340,22 @@ humanoid.StateChanged:Connect(function(_, new_state)
 
 	elseif new_state == Enum.HumanoidStateType.Landed then
 		is_airborne = false
-
 		stop_overlay("Jump_MidAir")
 		stop_overlay("Jump_Arms")
-
 		play_base("Jump_Land")
-
-		task.delay(0.2, function()
-			if not is_airborne then
-				active_base = nil
-			end
-		end)
 	end
 end)
 
-input_service.InputBegan:Connect(function(io, gp)
-	if gp then return end
-
-	if io.KeyCode == Enum.KeyCode.W then 
-		directional_table.Forward = true
-	end
-	if io.KeyCode == Enum.KeyCode.A then 
-		directional_table.Left = true
-	end
-	if io.KeyCode == Enum.KeyCode.D then 
-		directional_table.Right = true
-	end
-end)
-
-input_service.InputEnded:Connect(function(io, gp)
-	if gp then return end
-
-	if io.KeyCode == Enum.KeyCode.W then 
-		directional_table.Forward = false
-	end
-	if io.KeyCode == Enum.KeyCode.A then 
-		directional_table.Left = false
-	end
-	if io.KeyCode == Enum.KeyCode.D then 
-		directional_table.Right = false
-	end
-end)
-
+--------------------------------------------------
+-- DEATH
+--------------------------------------------------
 humanoid.Died:Connect(function()
-	if active_base then 
-		active_base:Stop(0) 
-	end
+	if active_base then active_base:Stop(0) end
 	clear_overlays()
 end)
+
+--------------------------------------------------
+-- INIT
+--------------------------------------------------
+load_animations()
+initialize_hips()
