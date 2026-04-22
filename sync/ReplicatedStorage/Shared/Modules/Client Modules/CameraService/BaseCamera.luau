@@ -16,15 +16,15 @@ local main_util   = require(ReplicatedStorage.Shared.Library.Util)
 -- Camera Values
 ------------------------------------------------------------------------
 
-local PITCH_MIN = math.rad(-70)
-local PITCH_MAX = math.rad(70)
+local PITCH_MIN = math.rad(-80)
+local PITCH_MAX = math.rad(80)
 
-local CAM_SMOOTH_SPEED    = 26
+local CAM_SMOOTH_SPEED    = 24
 
-local DEFAULT_DISTANCE    = 5
-local DEFAULT_SIDE        = 1.8
-local DEFAULT_HEIGHT      = 1.6
-local SHOULDER_LERP_SPEED = 45
+local DEFAULT_DISTANCE    = 5.5
+local DEFAULT_SIDE        = 1.3
+local DEFAULT_HEIGHT      = 1.7
+local SHOULDER_LERP_SPEED = 15
 
 local SPRINT_DISTANCE_ADD = 0
 local BASE_WALKSPEED      = 10
@@ -66,6 +66,7 @@ local FIRST_PERSON_EXCLUDED = {
 	["Left Leg"] = true,
 	["Right Leg"] = true,
 }
+
 ------------------------------------------------------------------------
 -- Module setup
 ------------------------------------------------------------------------
@@ -672,11 +673,11 @@ function BaseCamera:Update(dt: number)
 	self.RecoilYaw   = lerp(self.RecoilYaw,   0, RECOIL_DECAY_SPEED, dt)
 
 	local activeYaw   = (self.IsFreeLook and self.FreeLookYaw   or self.CameraYaw)
-	local activePitch = (self.IsFreeLook and self.FreeLookPitch or self.CameraPitch)
+	local activePitch = (self.IsFreeLook and self.FreeLookPitch or self.CameraPitch) + self.RecoilPitch
 
+	activePitch = math.clamp(activePitch, PITCH_MIN, PITCH_MAX)
 	activeYaw   += self.RecoilYaw
-	activePitch += self.RecoilPitch
-
+	
 	if not self.IsFreeLook then
 		local curYaw    = yawFromLook(root.CFrame.LookVector)
 		local diff      = math.atan2(math.sin(self.CameraYaw - curYaw), math.cos(self.CameraYaw - curYaw))
@@ -689,7 +690,8 @@ function BaseCamera:Update(dt: number)
 	-- 3. Shoulder lerp
 	--------------------------------------------------------------------
 
-	self.CurrentShoulder = lerp(self.CurrentShoulder, self.TargetShoulder, SHOULDER_LERP_SPEED, dt)
+	local shoulderAlpha = math.clamp(18 * dt, 0, 1) 
+	self.CurrentShoulder = self.CurrentShoulder + (self.TargetShoulder - self.CurrentShoulder) * shoulderAlpha
 
 	--------------------------------------------------------------------
 	-- 4. Distance & FOV
@@ -727,22 +729,12 @@ function BaseCamera:Update(dt: number)
 	local rayOrigin:  Vector3
 
 	if self.IsFirstPerson and not self.IsFreeLook then
-		local targetPos = headPos
-
-		self.SmoothedPos = lerpVec(
-			self.SmoothedPos,
-			targetPos,
-			FIRST_PERSON_SMOOTH,
-			dt
-		)
-
-		Camera.CFrame =
-			CFrame.new(self.SmoothedPos)
+		self.SmoothedPos = headPos -- Keep this updated for seamless transitions
+		Camera.CFrame = CFrame.new(headPos)
 			* CFrame.Angles(0, activeYaw, 0)
 			* CFrame.Angles(activePitch, 0, 0)
-
 		return
-
+			
 	elseif self.IsFreeLook then
 		if LocalPlayer.PlayerGui.Aiming.Regular_Crosshair.Visible == true then
 			LocalPlayer.PlayerGui.Aiming.Regular_Crosshair.Visible = false
@@ -808,20 +800,26 @@ function BaseCamera:Update(dt: number)
 	--------------------------------------------------------------------
 	-- 10. Smooth + apply
 	--------------------------------------------------------------------
-
 	local alpha = math.clamp(CAM_SMOOTH_SPEED * dt, 0, 1)
 
-	if (self.SmoothedPos - finalPos).Magnitude < 0.25 then
+	-- Increase responsiveness when moving to eliminate high-speed jitter
+	if humanoid.MoveDirection.Magnitude > 0 then
+		alpha = math.clamp((CAM_SMOOTH_SPEED + (humanoid.WalkSpeed * 1.5)) * dt, 0, 1)
+	end
+
+	-- Prevent the camera from "vibrating" when nearly at the target
+	if (self.SmoothedPos - finalPos).Magnitude < 0.01 then
 		self.SmoothedPos = finalPos
 	else
 		self.SmoothedPos = self.SmoothedPos:Lerp(finalPos, alpha)
 	end
 
-	Camera.CFrame =
-		CFrame.new(self.SmoothedPos)
+	Camera.CFrame = CFrame.new(self.SmoothedPos)
 		* CFrame.Angles(0, activeYaw, 0)
 		* CFrame.Angles(activePitch, 0, 0)
+	
 end
+	
 
 ------------------------------------------------------------------------
 -- End / Cut
