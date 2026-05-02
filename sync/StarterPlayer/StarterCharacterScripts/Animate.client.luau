@@ -14,6 +14,8 @@ local local_player = player_service.LocalPlayer
 local character    = script.Parent
 local humanoid: Humanoid = character:WaitForChild("Humanoid")
 
+local playing_sprint_arms = false
+
 local animator: Animator = humanoid:FindFirstChildOfClass("Animator")
 if not animator then
 	animator = Instance.new("Animator")
@@ -75,7 +77,7 @@ local right_hip_original_c1: CFrame?
 local ORIGINAL_HIP_HEIGHT = humanoid.HipHeight
 
 --------------------------------------------------
--- LOAD ANIMATIONS
+-- Utils
 --------------------------------------------------
 local function load_animations()
 	for _, animation in pairs(animations_table) do
@@ -97,9 +99,6 @@ local function load_animations()
 	end
 end
 
---------------------------------------------------
--- HIP INIT
---------------------------------------------------
 local function initialize_hips()
 	local torso = character:FindFirstChild("Torso") or character:FindFirstChild("UpperTorso")
 	if not torso then
@@ -119,9 +118,7 @@ local function initialize_hips()
 	right_hip_original_c1 = right_hip.C1
 end
 
---------------------------------------------------
--- STATE
---------------------------------------------------
+
 local function set_state(new_state)
 	if current_state == new_state then
 		return false
@@ -130,9 +127,6 @@ local function set_state(new_state)
 	return true
 end
 
---------------------------------------------------
--- HIP UPDATE
---------------------------------------------------
 local function set_target_hip_offset(offset: number)
 	target_hip_offset = offset
 end
@@ -156,6 +150,53 @@ local function update_hip_offset(dt: number)
 	humanoid.HipHeight = ORIGINAL_HIP_HEIGHT + current_hip_offset
 end
 
+local function if_tool_equipped()
+	local tool = character:FindFirstChildOfClass("Tool")
+	if not tool then return false end
+	return true
+end
+
+local function sprint_arms_overlay()
+	if character:GetAttribute("Sprint_Animation") then
+		return tostring(character:GetAttribute("Sprint_Animation") .. "_Sprint")
+	else
+		return "Sprint_Arms"
+	end
+end
+
+local function get_walk_animation()
+	-- Forward ALWAYS wins if pressed
+	if directional_table.Forward then
+		return "Walk_Forward"
+	end
+
+	-- Only allow lateral if forward is NOT pressed
+	if directional_table.Left then
+		return "Walk_Left"
+	end
+
+	if directional_table.Right then
+		return "Walk_Right"
+	end
+
+	return "Walk_Forward"
+end
+
+local function get_crouch_animation()
+	if directional_table.Forward then
+		return "CrouchWalk_Forward"
+	end
+
+	if directional_table.Left then
+		return "CrouchWalk_Left"
+	end
+
+	if directional_table.Right then
+		return "CrouchWalk_Right"
+	end
+
+	return "CrouchWalk_Forward"
+end
 --------------------------------------------------
 -- BASE / OVERLAY
 --------------------------------------------------
@@ -207,8 +248,10 @@ local function clear_overlays()
 	active_overlays = {}
 end
 
+
+
 --------------------------------------------------
--- MOVEMENT (FIXED STABILITY)
+-- MOVEMENT 
 --------------------------------------------------
 local function update_movement(speed: number)
 	if is_airborne then return end
@@ -232,6 +275,8 @@ local function update_movement(speed: number)
 		end
 		return
 	end
+	
+	local freelook = local_player:GetAttribute("FreeLook") == true
 
 	
 	if crouching then
@@ -239,34 +284,28 @@ local function update_movement(speed: number)
 			set_target_hip_offset(-0.85)
 			clear_overlays()
 			play_overlay("Crouch_Arms")
+		end
 
-			if directional_table.Forward then
-				play_base("CrouchWalk_Forward")
-			elseif directional_table.Left then
-				play_base("CrouchWalk_Left")
-			elseif directional_table.Right then
-				play_base("CrouchWalk_Right")
-			else
-				play_base("CrouchWalk_Forward")
-			end
+		-- ALWAYS update animation
+		if freelook then
+			play_base("Walk_Forward")
+		else
+			play_base(get_crouch_animation())
 		end
 		return
 	end
 	
 	if speed < 13 then
+
 		if set_state("WALK") then
 			set_target_hip_offset(0)
 			clear_overlays()
+		end
 
-			if directional_table.Forward then
-				play_base("Walk_Forward")
-			elseif directional_table.Left then
-				play_base("Walk_Left")
-			elseif directional_table.Right then
-				play_base("Walk_Right")
-			else
-				play_base("Walk_Forward")
-			end
+		if freelook then
+			play_base("Walk_Forward")
+		else
+			play_base(get_walk_animation())
 		end
 		return
 	end
@@ -275,8 +314,26 @@ local function update_movement(speed: number)
 	if speed >= 17 then
 		if set_state("SPRINT") then
 			clear_overlays()
-			play_base("Sprint")
+			play_base("Sprinting_Full")
+			play_overlay(sprint_arms_overlay())
 			play_overlay("Sprint_Lean")
+			
+			playing_sprint_arms = true
+			
+			character:GetAttributeChangedSignal("Sprint_Animation"):Connect(function()
+				if character:GetAttribute("Sprint_Animation") then
+					stop_overlay("Sprint_Arms")
+					play_overlay(sprint_arms_overlay())
+				end
+				
+				-- // if sprinting and sprint_animation is set to nil, stop sprint arms and return to base sprint
+				if character:GetAttribute("Sprint_Animation") == nil then
+					clear_overlays()
+					play_base("Sprinting_Full")
+					play_overlay("Sprint_Lean")
+					play_overlay("Sprint_Arms")
+				end
+			end)
 		end
 	end
 end
@@ -332,7 +389,10 @@ humanoid.StateChanged:Connect(function(_, new_state)
 	if new_state == Enum.HumanoidStateType.Jumping then
 		is_airborne = true
 		clear_overlays()
-		play_overlay("Jump_Arms")
+		
+		if not if_tool_equipped() then
+			play_overlay("Jump_Arms")
+		end
 
 	elseif new_state == Enum.HumanoidStateType.Freefall then
 		is_airborne = true

@@ -1,922 +1,652 @@
-------------------------------------------------------------------------
--- Services
-------------------------------------------------------------------------
+--!strict
+--!optimize 2
+------------
+-- @Praxitos
+-- BaseCameraScript (Enhanced with Custom First Person)
+------------
 
+-- // Services
 local InputService      = game:GetService("UserInputService")
 local RunService        = game:GetService("RunService")
 local PlayerService     = game:GetService("Players")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local TweenService      = game:GetService("TweenService")
 local Workspace         = game:GetService("Workspace")
+local TweenService      = game:GetService("TweenService")
 
+-- // Modules
 local CameraClass = require(script.Parent.Parent.Parent.Parent.Library.Classes.Miscellanous.CameraClass)
-local main_util   = require(ReplicatedStorage.Shared.Library.Util)
 
-------------------------------------------------------------------------
--- Camera Values
-------------------------------------------------------------------------
+-- // Base Object
+local BaseCamera = setmetatable({}, { __index = CameraClass })
+BaseCamera.__index = BaseCamera
 
-local PITCH_MIN = math.rad(-80)
-local PITCH_MAX = math.rad(80)
-
-local CAM_SMOOTH_SPEED    = 24
-
-local DEFAULT_DISTANCE    = 5.5
-local DEFAULT_SIDE        = 1.3
-local DEFAULT_HEIGHT      = 1.6
-local SHOULDER_LERP_SPEED = 15
-
-local SPRINT_DISTANCE_ADD = 0
-local BASE_WALKSPEED      = 10
-local MAX_WALKSPEED       = 18
-
-local BASE_FOV  = 90
-local MAX_FOV   = 105
-local FOV_SPEED = 8
-
-local ZOOM_MIN        = 1.5
-local ZOOM_MAX        = 3
-local ZOOM_STEP       = 0.6
-local ZOOM_LERP_SPEED = 45
-
-local COLLISION_OFFSET = 0.25
-
-local FREELOOK_PAN_SPEED      = 22
-local FREELOOK_PAN_THRESHOLD  = 0.25
-local FREELOOK_ORBIT_DISTANCE = 5
-
-local FIRST_PERSON_DEBOUNCE = 0.2
-local SHOULDER_DEBOUNCE     = 0.2
-local FREELOOK_DEBOUNCE     = 0.15
-
-local RECOIL_DECAY_SPEED = 16
-
-local HOLD_BREATH_FOV      = 40
-local HOLD_BREATH_IN_TIME  = 1
-local HOLD_BREATH_OUT_TIME = 0.5
-local AIM_FOV              = 50
-local AIM_FOV_IN_TIME      = 0.15
-local AIM_FOV_OUT_TIME     = 0.12
-
-
-local FIRST_PERSON_SMOOTH = 10 
-local FIRST_PERSON_EXCLUDED = {
-	["Left Arm"] = true,
-	["Right Arm"] = true,
-	["Left Leg"] = true,
-	["Right Leg"] = true,
-}
-
-------------------------------------------------------------------------
--- Module setup
-------------------------------------------------------------------------
-
-local BaseCamera  = setmetatable({}, {__index = CameraClass})
+-- // Constants
 local LocalPlayer = PlayerService.LocalPlayer
 local Camera      = Workspace.CurrentCamera
 
-local OffsetFolder =
-	ReplicatedStorage.Shared.Library.Configuration.Character_Variables.Camera.BaseCamera
+-- // Config
+local CameraOffsets = {
+	Third_Person = {
+		X = 1.5,
+		Y = 1,
+		Z = 3,
+	},
+	First_Person = {
+		X = 0,
+		Y = 1.5,  -- eye height above root
+		Z = 0,
+	}
+}
 
-local PlayerData   = LocalPlayer:WaitForChild("PlayerData")
+
+local RENDER_STEP_NAME = "BaseCamera_Update"
+local RENDER_PRIORITY = Enum.RenderPriority.Camera.Value
+
+-- // Camera Settings
+local CAM_SMOOTH_SPEED = 24
+local MouseSensitivity = 0.25
+local PITCH_MIN = math.rad(-80)
+local PITCH_MAX = math.rad(80)
+local Current_Camera = nil
+local CAMERA_TRANSITION_SPEED = 4 -- frames to blend between cameras
+
+local MIN_ZOOM = 2
+local MAX_ZOOM = 4
+local DEFAULT_ZOOM = 12
+local OCCLUSION_MARGIN = 0.25 -- Stops camera from clipping through walls
+
+local AIMING_FOV = 80
+local BASE_FOV = 90
+-- // Data
+local PlayerData = LocalPlayer:WaitForChild("PlayerData")
 local SettingsData = PlayerData:WaitForChild("Settings Data")
-local InputOptions = SettingsData:WaitForChild("Input Options")
+local InputData = SettingsData:WaitForChild("Input Options")
+local Shoulder_Switch = InputData:WaitForChild("Shoulder Switch")
+local First_Person = InputData:WaitForChild("First Person")
+local Free_Look = InputData:WaitForChild("Free Look")
 
-local Shoulder_Switch = InputOptions:WaitForChild("Shoulder Switch")
-local Free_Look       = InputOptions:WaitForChild("Free Look")
-local First_Person    = InputOptions:WaitForChild("First Person")
+local limbs = {
+	"Right Arm",
+	"Left Arm",
+	"Right Leg",
+	"Left Leg",
+}
 
-local Aiming_Screengui        = LocalPlayer.PlayerGui:WaitForChild("Aiming")
-local hold_breath_image_label = Aiming_Screengui:WaitForChild("hold_breath")
+local Presets = {
+	OverTheShoulder = {
+		CameraType = Enum.CameraType.Scriptable,
+		MouseLocked = true,
+		MouseVisible = false,
+		FOV = BASE_FOV,
+		AutoRotate = false,
+		Cursor_UI = true,
+		Aiming_Dynamic = true,
+	},
+	FirstPerson = {
+		CameraType = Enum.CameraType.Scriptable,
+		MouseLocked = true,
+		MouseVisible = false,
+		FOV = BASE_FOV,
+		AutoRotate = false,
+		Cursor_UI = true,
+		Aiming_Dynamic = true,
+	},
+	CustomCamera = {
+		CameraType = Enum.CameraType.Custom,
+		MouseLocked = false,
+		MouseVisible = true,
+		FOV = BASE_FOV,
+		AutoRotate = true,
+		Cursor_UI = false,
+		Aiming_Dynamic = false,
+	},
+}
+local TweenCache = {}
+-- // Input
+local Input_Connections = {}
 
-------------------------------------------------------------------------
--- Helpers
-------------------------------------------------------------------------
+-- // Constructor
+function BaseCamera.new(cameraInfo)
+	local self = CameraClass.new(cameraInfo)
+	setmetatable(self, BaseCamera)
 
-local function getOffset(name: string, default: number): number
-	local inst = OffsetFolder:FindFirstChild(name)
-	return (inst and inst:IsA("NumberValue")) and inst.Value or default
+	self.CameraPosition = Camera.CFrame.Position
+	self.CurrentMode = nil
+
+	self.CameraYaw = 0
+	self.CameraPitch = 0
+
+	-- shoulder system
+	self.ShoulderAlpha = 1 -- 0 = left, 1 = right
+	self.ShoulderTarget = 1
+	self.ShoulderSwitchSpeed = 6
+
+	-- first person specific
+	self.IsFirstPerson = false
+
+	-- camera transition
+	self.TransitionProgress = 1 -- 0 to 1, 1 = fully transitioned
+	self.PreviousCameraPos = Camera.CFrame.Position
+	self.PreviousCameraAngle = Camera.CFrame
+
+	-- first person torso fade
+	self.TorsoTween = nil
+	self.TorsoFadeOut = false
+
+	self.RecoilPitch = 0
+	self.RecoilYaw = 0
+
+	self.RecoilTargetPitch = 0
+	self.RecoilTargetYaw = 0
+
+	self.RecoilRecoverySpeed = 10
+	self.RecoilSnappiness = 20
+	
+	self.ShoulderZoom = CameraOffsets.Third_Person.Z
+	self.TargetShoulderZoom = CameraOffsets.Third_Person.Z
+	self.ZoomSpeed = 10
+	
+	return self
 end
 
-local function getKeyName(value: string): string
-	return value:gsub("Enum.KeyCode.", "")
+-- // Helpers
+function BaseCamera:_unbind()
+	RunService:UnbindFromRenderStep(RENDER_STEP_NAME)
 end
 
-local function keyMatches(pressed: string, binding: string): boolean
-	if pressed == binding then return true end
-	local alts = { Alt = true, LeftAlt = true, RightAlt = true }
-	return alts[pressed] and alts[binding] or false
+function BaseCamera:_bind(callback)
+	RunService:BindToRenderStep(RENDER_STEP_NAME, RENDER_PRIORITY, callback)
+end
+
+function BaseCamera:_updateRecoil(dt: number)
+	self.RecoilTargetPitch *= math.exp(-self.RecoilRecoverySpeed * dt)
+	self.RecoilTargetYaw *= math.exp(-self.RecoilRecoverySpeed * dt)
+
+	self.RecoilPitch += (self.RecoilTargetPitch - self.RecoilPitch) * math.clamp(self.RecoilSnappiness * dt, 0, 1)
+	self.RecoilYaw += (self.RecoilTargetYaw - self.RecoilYaw) * math.clamp(self.RecoilSnappiness * dt, 0, 1)
+end
+
+function BaseCamera:_getCharacterParts()
+	local character = LocalPlayer.Character
+	if not character then return end
+
+	local root = character:FindFirstChild("HumanoidRootPart")
+	local head = character:FindFirstChild("Head")
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+
+	if not root or not head or not humanoid then return end
+
+	return character, root, head, humanoid
 end
 
 local function yawFromLook(look: Vector3): number
 	return math.atan2(-look.X, -look.Z)
 end
 
-local function lerp(a: number, b: number, speed: number, dt: number): number
-	return a + (b - a) * math.clamp(speed * dt, 0, 1)
-end
-
-local function lerpVec(a: Vector3, b: Vector3, speed: number, dt: number): Vector3
-	return a:Lerp(b, math.clamp(speed * dt, 0, 1))
-end
-
-local function getHeadPos(character: Model): Vector3
-	local head = character:FindFirstChild("Head")
-	if head and head:IsA("BasePart") then return head.Position end
-	local root = character:FindFirstChild("HumanoidRootPart")
-	return root and (root.Position + Vector3.new(0, 1.5, 0)) or Vector3.zero
-end
-
-local function exitFreeLook(self, char)
-	self.IsFreeLook = false
-	self.FreeLookPhase = "orbiting"
-	self.FreeLookRMB = false
-
-	local humanoid = char and char:FindFirstChildOfClass("Humanoid")
-	local root = char and char:FindFirstChild("HumanoidRootPart")
-
-	if root then
-		local _, y, _ = Camera.CFrame:ToOrientation()
-		self.CameraYaw = y
-		self.FreeLookYaw = y
-
-		root.CFrame = CFrame.new(root.Position) * CFrame.Angles(0, y, 0)
+local function resolveKeyFromString(value: string): Enum.KeyCode?
+	local keyName = string.match(value, "Enum%.KeyCode%.(.+)")
+	if not keyName then
+		warn("[BaseCamera] Invalid KeyCode format:", value)
+		return nil
 	end
 
-	if humanoid then
-		humanoid.AutoRotate = true
-	end
-
-	InputService.MouseIconEnabled = false
-	InputService.MouseBehavior = Enum.MouseBehavior.LockCenter
-
-	local gui = LocalPlayer:FindFirstChild("PlayerGui")
-	if gui then
-	    local aiming = gui:FindFirstChild("Aiming")
-	    if aiming and aiming:FindFirstChild("Regular_Crosshair") then
-	        aiming.Regular_Crosshair.Visible = true
-	    end
-	end
-
-	LocalPlayer:SetAttribute("FreeLook", false)
+	return Enum.KeyCode[keyName]
 end
 
-local function updateMouseBehavior(self)
-	if self.IsFirstPerson then
-		InputService.MouseBehavior = Enum.MouseBehavior.LockCenter
-		InputService.MouseIconEnabled = false
-		return
+local function angleDifference(a: number, b: number): number
+	local diff = (a - b + math.pi) % (2 * math.pi) - math.pi
+	return diff
+end
+
+local function smoothLerp(a: CFrame, b: CFrame, t: number): CFrame
+	local eased = t * t * (3 - 2 * t)
+	return a:Lerp(b, eased)
+end
+
+local function first_person_transparency( character: Instance, isFirstPerson: boolean)
+
+	local tweenInfo = TweenInfo.new(
+		0.25, -- duration (tune this)
+		Enum.EasingStyle.Quad,
+		Enum.EasingDirection.Out
+	)
+
+	for _, obj in character:GetDescendants() do
+		if obj:IsA("BasePart") then
+			local targetTransparency
+
+			if isFirstPerson then
+				if table.find(limbs, obj.Name) then
+					targetTransparency = 0
+				else
+					targetTransparency = 1
+				end
+			else
+				targetTransparency = 0
+			end
+
+			-- cancel existing tween on this part
+			if TweenCache[obj] then
+				TweenCache[obj]:Cancel()
+			end
+
+			-- create tween
+			local tween = TweenService:Create(obj, tweenInfo, {
+				LocalTransparencyModifier = targetTransparency
+			})
+
+			tween:Play()
+			TweenCache[obj] = tween
+		end
 	end
 
-	if self.IsFreeLook then
-		if self.FreeLookRMB then
+	return TweenCache
+end
+
+function BaseCamera:_setupAlignOrientation(root: BasePart)
+	local existing = root:FindFirstChild("CameraAlign")
+	if existing then
+		existing:Destroy()
+	end
+
+	local att = Instance.new("Attachment")
+	att.Name = "CameraAlignAttachment"
+	att.Parent = root
+
+	local align = Instance.new("AlignOrientation")
+	align.Name = "CameraAlign"
+	align.Mode = Enum.OrientationAlignmentMode.OneAttachment
+	align.Attachment0 = att
+	align.MaxAngularVelocity = 100
+	align.MaxTorque = 100000
+	align.Responsiveness = 100
+	align.AlignType = Enum.AlignType.AllAxes
+	align.ReactionTorqueEnabled = false
+	align.RigidityEnabled = true
+	align.Parent = root
+
+	self._align = align
+	self._alignAttachment = att
+end
+
+-- // Shoulder switch (target only)
+function BaseCamera:_switch_shoulder(target: string)
+	if target == "Left" then
+		self.ShoulderTarget = 0
+	else
+		self.ShoulderTarget = 1
+	end
+
+	LocalPlayer:SetAttribute("Current_Shoulder", target)
+end
+
+-- // Camera Mode
+function BaseCamera:CustomCamera()
+	self:_unbind()
+	self.IsFirstPerson = false
+	self.CurrentMode = "CustomCamera"
+	self.TransitionProgress = 0 -- Reset transition for smooth entry
+
+	local character, root, head, humanoid = self:_getCharacterParts()
+	if not root then return end
+
+	-- Cleanup Physical Constraints
+	if self._align then
+		self._align:Destroy()
+		self._align = nil
+	end
+
+	-- Reset Character Behavior
+	first_person_transparency(character, false)
+	-- Camera State
+	local currentZoom = MAX_ZOOM 
+	local isRightMouseDown = false
+	local zoomSensitivity = 2 -- Ensure this is defined or use a constant
+
+	LocalPlayer:SetAttribute("FreeLook", true)
+	
+	-- Input Handling
+	local inputConn = InputService.InputChanged:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseWheel then
+			currentZoom = math.clamp(
+				currentZoom - (input.Position.Z * zoomSensitivity),
+				MIN_ZOOM,
+				MAX_ZOOM
+			)
+		elseif input.UserInputType == Enum.UserInputType.MouseMovement and isRightMouseDown then
+			local delta = input.Delta
+			self.CameraYaw -= math.rad(delta.X * MouseSensitivity)
+			self.CameraPitch = math.clamp(
+				self.CameraPitch - math.rad(delta.Y * MouseSensitivity),
+				PITCH_MIN,
+				PITCH_MAX
+			)
+		end
+	end)
+
+	local mouseConn1 = InputService.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton2 then
+			isRightMouseDown = true
 			InputService.MouseBehavior = Enum.MouseBehavior.LockCurrentPosition
-		else
+		end
+	end)
+
+	local mouseConn2 = InputService.InputEnded:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton2 then
+			isRightMouseDown = false
 			InputService.MouseBehavior = Enum.MouseBehavior.Default
 		end
-		return
-	end
+	end)
 
-	InputService.MouseBehavior = Enum.MouseBehavior.LockCenter
-	InputService.MouseIconEnabled = false
-end
+	-- Main Update Loop
+	self:_bind(function(dt)
+		local _, rootPart = self:_getCharacterParts()
+		if not rootPart then return end
 
-------------------------------------------------------------------------
--- FOV tween helper
-------------------------------------------------------------------------
+		-- 1. Calculate the New Target Rotation & Position
+		local rotation =
+			CFrame.Angles(0, self.CameraYaw + self.RecoilYaw, 0)
+			* CFrame.Angles(self.CameraPitch + self.RecoilPitch, 0, 0)
+		local cameraDir = rotation.LookVector
+		local cameraFocus = rootPart.Position + Vector3.new(0, 1.5, 0)
 
-local activeFOVTween: Tween? = nil
+		-- 2. Raycast Occlusion
+		local rayParams = RaycastParams.new()
+		rayParams.FilterDescendantsInstances = {character}
+		rayParams.FilterType = Enum.RaycastFilterType.Exclude
 
-local function tweenFOV(target: number, duration: number)
-	if activeFOVTween then
-		activeFOVTween:Cancel()
-	end
-	activeFOVTween = TweenService:Create(
-		Camera,
-		TweenInfo.new(duration, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-		{ FieldOfView = target }
-	)
-	activeFOVTween:Play()
-end
-
-local activeFPTween: Tween? = nil
-
-local function tweenFirstPerson(char: Model, entering: boolean)
-	if activeFPTween then
-		activeFPTween:Cancel()
-	end
-
-	local head  = char:FindFirstChild("Head")
-	local torso = char:FindFirstChild("Torso")
-
-	if entering then
-		if head  then head.LocalTransparencyModifier  = 0 end
-		if torso then torso.LocalTransparencyModifier = 0 end
-
-		local targetT = 1
-		local info    = TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
-
-		for _, desc in ipairs(char:GetDescendants()) do
-			if desc:IsA("BasePart") and not FIRST_PERSON_EXCLUDED[desc.Name] then
-				TweenService:Create(desc, info, {
-					LocalTransparencyModifier = targetT
-				}):Play()
-			end
+		local rayResult = Workspace:Raycast(cameraFocus, -cameraDir * currentZoom, rayParams)
+		local finalZoom = currentZoom
+		if rayResult then
+			finalZoom = math.max(rayResult.Distance - OCCLUSION_MARGIN, MIN_ZOOM)
 		end
-	else
-		local targetT = 0
-		local info    = TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 
-		for _, desc in ipairs(char:GetDescendants()) do
-			if desc:IsA("BasePart") and not FIRST_PERSON_EXCLUDED[desc.Name] then
-				TweenService:Create(desc, info, {
-					LocalTransparencyModifier = targetT
-				}):Play()
-			end
+		-- 3. Define the Ideal Target CFrame
+		local targetCFrame = CFrame.new(cameraFocus - (cameraDir * finalZoom)) * rotation
+
+		-- 4. Apply Transition (Tweening)
+		if self.TransitionProgress < 1 then
+			self.TransitionProgress = math.min(self.TransitionProgress + dt * CAMERA_TRANSITION_SPEED, 1)
+			-- Smoothstep easing
+			local eased = self.TransitionProgress * self.TransitionProgress * (3 - 2 * self.TransitionProgress)
+			Camera.CFrame = self.PreviousCameraAngle:Lerp(targetCFrame, eased)
+		else
+			-- Full control handed over
+			Camera.CFrame = targetCFrame
 		end
+
+		-- Cleanup if mode changes
+		if self.CurrentMode ~= "CustomCamera" then
+			inputConn:Disconnect()
+			mouseConn1:Disconnect()
+			mouseConn2:Disconnect()
+			
+			LocalPlayer:SetAttribute("FreeLook", false)
+			self:_unbind()
+		end
+	end)
+end
+
+--- Custom First Person Camera - Built entirely from scratch
+function BaseCamera:FirstPerson()
+	self:_unbind()
+	self.IsFirstPerson = true
+	self.TransitionProgress = 0 
+	self.TorsoFadeOut = true
+
+	local character, root = self:_getCharacterParts()
+	if not root then return end
+
+	-- Removed character-based Yaw initialization to prevent snapping
+	if self._align then
+		self._align:Destroy()
+		self._align = nil
 	end
+	
+	self.aim_check = LocalPlayer.Character:GetAttributeChangedSignal("Aiming"):Connect(function()
+		local tween = TweenService:Create(Camera, TweenInfo.new(0.5), {FieldOfView = AIMING_FOV})
+		local tween1 = TweenService:Create(Camera, TweenInfo.new(0.5), {FieldOfView = BASE_FOV})
+
+		if LocalPlayer.Character:GetAttribute("Aiming") then
+			tween:Play()
+			print("aiming")
+		else
+			tween1:Play()
+		end
+	end)
+
+	first_person_transparency(character, true)
+
+	self:_bind(function(dt: number)
+		self:_updateRecoil(dt) -- Handle recoil spring
+		local character, root, head, humanoid = self:_getCharacterParts()
+		if not root then return end
+
+		local delta = InputService:GetMouseDelta()
+		self.CameraYaw -= math.rad(delta.X * MouseSensitivity)
+		self.CameraPitch = math.clamp(
+			self.CameraPitch - math.rad(delta.Y * MouseSensitivity),
+			PITCH_MIN,
+			PITCH_MAX
+		)
+
+		local offset = CameraOffsets.First_Person
+		local focusPoint = root.Position + Vector3.new(0, offset.Y, 0)
+
+		-- Integrated Recoil into the rotation
+		local targetCFrame =
+			CFrame.new(focusPoint)
+			* CFrame.Angles(0, self.CameraYaw + self.RecoilYaw, 0)
+			* CFrame.Angles(self.CameraPitch + self.RecoilPitch, 0, 0)
+
+		self.TransitionProgress = math.min(self.TransitionProgress + dt * CAMERA_TRANSITION_SPEED, 1)
+		local eased = self.TransitionProgress * self.TransitionProgress * (3 - 2 * self.TransitionProgress)
+		Camera.CFrame = self.PreviousCameraAngle:Lerp(targetCFrame, eased)
+
+		if humanoid and humanoid.Health > 0 then
+			root.CFrame = CFrame.new(root.Position) * CFrame.Angles(0, self.CameraYaw, 0)
+		end
+
+		InputService.MouseBehavior = Enum.MouseBehavior.LockCenter
+	end)
 end
 
-------------------------------------------------------------------------
--- Hold Breath
-------------------------------------------------------------------------
+function BaseCamera:OverTheShoulder()
+	self:_unbind()
+	self.IsFirstPerson = false
+	self.TransitionProgress = 0
+	
+	self.aim_check = LocalPlayer.Character:GetAttributeChangedSignal("Aiming"):Connect(function()
+		local tween = TweenService:Create(Camera, TweenInfo.new(0.5), {FieldOfView = AIMING_FOV})
+		local tween1 = TweenService:Create(Camera, TweenInfo.new(0.5), {FieldOfView = BASE_FOV})
+		
+		if LocalPlayer.Character:GetAttribute("Aiming") then
+			tween:Play()
+			print("aiming")
+		else
+			tween1:Play()
+		end
+	end)
+	local character, root, _, humanoid = self:_getCharacterParts()
+	if not root then return end
 
-local holdBreathTweens: {Tween} = {}
+	-- Removed character-based LookVector overwrite to preserve camera direction
 
-local function cancelHoldBreathTweens()
-	for _, t in ipairs(holdBreathTweens) do
-		t:Cancel()
-	end
-	table.clear(holdBreathTweens)
+	local zoomConn = InputService.InputChanged:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseWheel then
+			self.TargetShoulderZoom = math.clamp(self.TargetShoulderZoom - input.Position.Z, 1.5, 3)
+		end
+	end)
+
+	if humanoid then humanoid.AutoRotate = false end
+	if not self._align then self:_setupAlignOrientation(root) end
+
+	first_person_transparency(character, false)
+
+	self:_bind(function(dt: number)
+		self:_updateRecoil(dt) -- Handle recoil spring
+		local character, root = self:_getCharacterParts()
+		if not root then return end
+
+		local delta = InputService:GetMouseDelta()
+		self.CameraYaw -= math.rad(delta.X * MouseSensitivity)
+		self.CameraPitch = math.clamp(
+			self.CameraPitch - math.rad(delta.Y * MouseSensitivity),
+			PITCH_MIN,
+			PITCH_MAX
+		)
+
+		-- Integrated Recoil into the rotation
+		local rotation =
+			CFrame.Angles(0, self.CameraYaw + self.RecoilYaw, 0)
+			* CFrame.Angles(self.CameraPitch + self.RecoilPitch, 0, 0)
+
+		local offset = CameraOffsets.Third_Person
+		local focusPoint = root.Position + Vector3.new(0, 1, 0)
+
+		self.ShoulderAlpha += (self.ShoulderTarget - self.ShoulderAlpha) * math.clamp(self.ShoulderSwitchSpeed * dt, 0, 1)
+		self.ShoulderZoom += (self.TargetShoulderZoom - self.ShoulderZoom) * math.clamp(self.ZoomSpeed * dt, 0, 1)
+
+		local x_offset = offset.X * ((self.ShoulderAlpha * 2) - 1)
+		local desiredPos = focusPoint + (rotation.RightVector * x_offset) - (rotation.LookVector * self.ShoulderZoom) + Vector3.new(0, offset.Y, 0)
+
+		local targetCFrame = CFrame.new(desiredPos) * rotation
+		self.TransitionProgress = math.min(self.TransitionProgress + dt * CAMERA_TRANSITION_SPEED, 1)
+		local eased = self.TransitionProgress * self.TransitionProgress * (3 - 2 * self.TransitionProgress)
+		Camera.CFrame = self.PreviousCameraAngle:Lerp(targetCFrame, eased)
+
+		if self._align then
+			self._align.CFrame = CFrame.Angles(0, self.CameraYaw, 0)
+		end
+
+		InputService.MouseBehavior = Enum.MouseBehavior.LockCenter
+		if self.CurrentMode ~= "OverTheShoulder" then zoomConn:Disconnect() end
+	end)
 end
 
-local function holdBreath()
-	cancelHoldBreathTweens()
-	if activeFOVTween then activeFOVTween:Cancel() end
+-- // Camera switching
+function BaseCamera:Switch_Camera(target: string)
+	if not Presets[target] then return end
 
-	local imageTween = TweenService:Create(
-		hold_breath_image_label,
-		TweenInfo.new(HOLD_BREATH_IN_TIME),
-		{ ImageTransparency = 0 }
-	)
-	local fovTween = TweenService:Create(
-		Camera,
-		TweenInfo.new(HOLD_BREATH_IN_TIME, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-		{ FieldOfView = HOLD_BREATH_FOV }
-	)
+	-- Capture rotation before unbinding so the next mode knows where we were looking
+	local look = Camera.CFrame.LookVector
+	self.CameraYaw = math.atan2(-look.X, -look.Z)
+	self.CameraPitch = math.asin(look.Y)
 
-	table.insert(holdBreathTweens, imageTween)
-	table.insert(holdBreathTweens, fovTween)
+	self.PreviousCameraAngle = Camera.CFrame
+	self.PreviousCameraPos = Camera.CFrame.Position
 
-	imageTween:Play()
-	fovTween:Play()
-end
+	self:_unbind()
+	self.CurrentMode = target
+	self.TransitionProgress = 0
 
-local function releaseBreath(isAiming: boolean)
-	cancelHoldBreathTweens()
-	if activeFOVTween then activeFOVTween:Cancel() end
-
-	local imageTween = TweenService:Create(
-		hold_breath_image_label,
-		TweenInfo.new(HOLD_BREATH_OUT_TIME),
-		{ ImageTransparency = 1 }
-	)
-	local targetFOV = isAiming and AIM_FOV or BASE_FOV
-	local fovTween = TweenService:Create(
-		Camera,
-		TweenInfo.new(HOLD_BREATH_OUT_TIME, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-		{ FieldOfView = targetFOV }
-	)
-
-	table.insert(holdBreathTweens, imageTween)
-	table.insert(holdBreathTweens, fovTween)
-
-	imageTween:Play()
-	fovTween:Play()
-
-	main_util.applyRecoil(100, 10, 25)
-end
-
-------------------------------------------------------------------------
--- Constructor
-------------------------------------------------------------------------
-
-function BaseCamera.new(cameraInfo)
-	local self = CameraClass.new(cameraInfo)
-	setmetatable(self, {__index = BaseCamera})
-	self.CameraPosition = Camera.CFrame.Position
-	self.priority = 0
-	return self
-end
-
-------------------------------------------------------------------------
--- Start
-------------------------------------------------------------------------
-
-function BaseCamera:Start()
-
-	Camera.CameraType             = Enum.CameraType.Scriptable
-	LocalPlayer.CameraMode        = Enum.CameraMode.Classic
-	InputService.MouseBehavior    = Enum.MouseBehavior.LockCenter
-	InputService.MouseIconEnabled = false
-	LocalPlayer.PlayerGui.Aiming.Regular_Crosshair.Visible = true
-
-	LocalPlayer:SetAttribute("Current_Shoulder", "Right")
-
-	self.CameraYaw   = 0
-	self.CameraPitch = 0
-
-	self.IsFreeLook       = false
-	self.FreeLookPhase    = "orbiting"
-	self.FreeLookYaw      = 0
-	self.FreeLookPitch    = 0
-	self.FreeLookDebounce = false
-	self.FreeLookRMB      = false
-
-	self.IsFirstPerson       = false
-	self.FirstPersonDebounce = false
-
-	self.RightShoulderOffset = getOffset("sideOffset", DEFAULT_SIDE)
-	self.LeftShoulderOffset  = -getOffset("sideOffset", DEFAULT_SIDE)
-	self.IsRightShoulder     = true
-	self.TargetShoulder      = self.RightShoulderOffset
-	self.CurrentShoulder     = self.TargetShoulder
-	self.ShoulderDebounce    = false
-
-	self.BaseDistance    = math.clamp(getOffset("distanceBehind", DEFAULT_DISTANCE), ZOOM_MIN, ZOOM_MAX)
-	self.TargetDistance  = self.BaseDistance
-	self.CurrentDistance = self.BaseDistance
-
-	self.CurrentFOV  = BASE_FOV
-	self.SmoothedPos = Camera.CFrame.Position
-
-	self.RecoilPitch = 0
-	self.RecoilYaw   = 0
-
-	self.IsAiming     = false
-	self.IsHoldBreath = false
-
-	-- first person transparency cache
-	self.TransparencyCache = {}
+	local preset = Presets[target]
+	Camera.CameraType = preset.CameraType
+	Camera.FieldOfView = preset.FOV or 70
+	InputService.MouseIconEnabled = preset.MouseVisible or false
+	InputService.MouseBehavior = preset.MouseLocked and Enum.MouseBehavior.LockCenter or Enum.MouseBehavior.Default
 
 	local character = LocalPlayer.Character
-	local root      = character and character:FindFirstChild("HumanoidRootPart")
-	if root then
-		self.CameraYaw   = yawFromLook(root.CFrame.LookVector)
-		self.FreeLookYaw = self.CameraYaw
-		self.SmoothedPos = root.Position + Vector3.new(0, getOffset("heightOffset", DEFAULT_HEIGHT), 0)
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if humanoid then
+		task.defer(function() humanoid.AutoRotate = preset.AutoRotate or false end)
 	end
 
-	self.RaycastParams            = RaycastParams.new()
-	self.RaycastParams.FilterType = Enum.RaycastFilterType.Blacklist
-
-	------------------------------------------------------------------------
-	-- First person transparency helpers
-	------------------------------------------------------------------------
-
-	local function hideCharacter(char: Model)
-		self.TransparencyCache = {}
-		for _, desc in ipairs(char:GetDescendants()) do
-			if desc:IsA("BasePart") and desc.Name ~= "HumanoidRootPart" then
-				self.TransparencyCache[desc] = desc.LocalTransparencyModifier
-				desc.LocalTransparencyModifier = 1
-			elseif desc:IsA("Decal") then
-				self.TransparencyCache[desc] = desc.Transparency
-				desc.Transparency = 1
-			end
-		end
+	if LocalPlayer.PlayerGui:FindFirstChild("Aiming") then
+		LocalPlayer.PlayerGui.Aiming.Regular_Crosshair.Visible = preset.Cursor_UI or false
 	end
+	
+	self.aim_check = nil 
 
-	local function showCharacter(char: Model)
-		for _, desc in ipairs(char:GetDescendants()) do
-			if desc:IsA("BasePart") and desc.Name ~= "HumanoidRootPart" then
-				desc.LocalTransparencyModifier = self.TransparencyCache[desc] or 0
-			elseif desc:IsA("Decal") then
-				desc.Transparency = self.TransparencyCache[desc] or 0
-			end
-		end
-		self.TransparencyCache = {}
-	end
+	self[target](self)
+	Current_Camera = target
+end
 
-	self._hideCharacter = hideCharacter
-	self._showCharacter = showCharacter
-
-	------------------------------------------------------------------------
-	-- Character attribute watchers
-	------------------------------------------------------------------------
-
-	local function connectCharacterAttributes(char: Model)
-
-		char:GetAttributeChangedSignal("Aiming"):Connect(function()
-			local isAiming = char:GetAttribute("Aiming") == true
-			self.IsAiming = isAiming
-			if not self.IsHoldBreath then
-				tweenFOV(
-					isAiming and AIM_FOV or BASE_FOV,
-					isAiming and AIM_FOV_IN_TIME or AIM_FOV_OUT_TIME
-				)
-			end
-		end)
-
-		char:GetAttributeChangedSignal("HoldBreathe"):Connect(function()
-			local isHolding = char:GetAttribute("HoldBreathe") ~= nil
-			if isHolding and not self.IsHoldBreath then
-				self.IsHoldBreath = true
-				holdBreath()
-			elseif not isHolding and self.IsHoldBreath then
-				self.IsHoldBreath = false
-				releaseBreath(self.IsAiming)
-			end
-		end)
-
-		local left_arm = char:WaitForChild("Left Arm")
-		left_arm.CanCollide = false
-		local right_arm = char:WaitForChild("Right Arm")
-		right_arm.CanCollide = false
-	end
-
+-- // Lifecycle
+function BaseCamera:Start()
+	local character = LocalPlayer.Character
 	if character then
-		connectCharacterAttributes(character)
+		local root = character:FindFirstChild("HumanoidRootPart")
+		if root then
+			self.CameraYaw = yawFromLook(root.CFrame.LookVector)
+		end
 	end
 
-	self.Connections = {
+	self:Switch_Camera("OverTheShoulder")
 
-		RunService.RenderStepped:Connect(function(dt)
-			self:Update(dt)
-		end),
+	self:_switch_shoulder("Right")
 
-		------------------------------------------------------------------------
-		-- Keyboard input
-		------------------------------------------------------------------------
+	local shoulder_switch_key = resolveKeyFromString(Shoulder_Switch.Value)
+	local first_person_key = resolveKeyFromString(First_Person.Value)
+	local free_look_key = resolveKeyFromString(Free_Look.Value)
+
+	Input_Connections = {
 		InputService.InputBegan:Connect(function(input, gameProcessed)
 			if gameProcessed then return end
+			if input.KeyCode == shoulder_switch_key then
+				local current = LocalPlayer:GetAttribute("Current_Shoulder")
 
-			if input.UserInputType == Enum.UserInputType.MouseButton2 then
-					self.FreeLookRMB = true
-				return
-			end
-
-			if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
-			if input.KeyCode.Name == "Unknown" then return end
-
-			local pressedName    = input.KeyCode.Name
-			local char           = LocalPlayer.Character
-			local humanoid       = char and char:FindFirstChildOfClass("Humanoid")
-			local shoulderKey    = getKeyName(Shoulder_Switch.Value)
-			local freeLookKey    = getKeyName(Free_Look.Value)
-			local firstPersonKey = getKeyName(First_Person.Value)
-
-			if keyMatches(pressedName, shoulderKey) then
-				if self.ShoulderDebounce then return end
-				self.ShoulderDebounce = true
-				self.IsRightShoulder  = not self.IsRightShoulder
-				self.TargetShoulder   = self.IsRightShoulder
-					and self.RightShoulderOffset or self.LeftShoulderOffset
-
-				if LocalPlayer:GetAttribute("Current_Shoulder") == "Right" then
-					LocalPlayer:SetAttribute("Current_Shoulder", "Left")
+				if current == "Left" then
+					self:_switch_shoulder("Right")
 				else
-					LocalPlayer:SetAttribute("Current_Shoulder", "Right")
+					self:_switch_shoulder("Left")
 				end
-
-				task.delay(SHOULDER_DEBOUNCE, function() self.ShoulderDebounce = false end)
-
-			elseif keyMatches(pressedName, freeLookKey) then
-				if self.FreeLookDebounce then return end
-				self.FreeLookDebounce = true
-				task.delay(FREELOOK_DEBOUNCE, function() self.FreeLookDebounce = false end)
-
-				self.IsFreeLook = not self.IsFreeLook
-
-				if self.IsFreeLook then
-					self.IsFreeLook = true
-					self.FreeLookPhase = "panning"
-
-					if not self.IsFreeLook then
-						self.FreeLookYaw   = self.CameraYaw
-						self.FreeLookPitch = self.CameraPitch
-					end
-
-					local headPos = getHeadPos(char)
-					local rotation = CFrame.Angles(0, self.FreeLookYaw, 0) * CFrame.Angles(self.FreeLookPitch, 0, 0)
-
-					self.FreeLookTargetPos = headPos - rotation.LookVector * FREELOOK_ORBIT_DISTANCE
-
-					-- IMPORTANT: start from actual camera position
-					self.SmoothedPos = Camera.CFrame.Position
-
-					InputService.MouseBehavior = Enum.MouseBehavior.Default
-					InputService.MouseIconEnabled = true
-
-					humanoid.AutoRotate = not self.IsFreeLook
+			elseif input.KeyCode == first_person_key then
+				if Current_Camera == "FirstPerson" then
+					self:Switch_Camera("OverTheShoulder")
 				else
-					local char = LocalPlayer.Character
-					exitFreeLook(self, char)
+					self:Switch_Camera("FirstPerson")
 				end
-
-			elseif keyMatches(pressedName, firstPersonKey) then
-				if self.FirstPersonDebounce then return end
-				self.FirstPersonDebounce = true
-
-				local wasFirstPerson = self.IsFirstPerson
-				self.IsFirstPerson = not self.IsFirstPerson
-				LocalPlayer:SetAttribute("FirstPerson", self.IsFirstPerson)
-
-				if self.IsFreeLook then exitFreeLook(self, char) end
-				self.FreeLookYaw   = self.CameraYaw
-				self.FreeLookPitch = self.CameraPitch
-
-				if char then
-					tweenFirstPerson(char, self.IsFirstPerson)
+			elseif input.KeyCode == free_look_key then
+				if Current_Camera == "CustomCamera" then
+					self:Switch_Camera("OverTheShoulder")
+				else
+					self:Switch_Camera("CustomCamera")
 				end
-
-				task.delay(FIRST_PERSON_DEBOUNCE, function() self.FirstPersonDebounce = false end)
 				
-				
-			end
-		end),
-
-		------------------------------------------------------------------------
-		-- RMB released
-		------------------------------------------------------------------------
-		InputService.InputEnded:Connect(function(input)
-			if input.UserInputType == Enum.UserInputType.MouseButton2 then
-				self.FreeLookRMB = false
-			end
-		end),
-
-		------------------------------------------------------------------------
-		-- Scroll zoom
-		------------------------------------------------------------------------
-		InputService.InputChanged:Connect(function(input, gameProcessed)
-			if gameProcessed then return end
-			if input.UserInputType ~= Enum.UserInputType.MouseWheel then return end
-			if self.IsFreeLook or self.IsFirstPerson then return end
-
-			local direction = -input.Position.Z
-			self.TargetDistance = math.clamp(
-				self.TargetDistance + direction * ZOOM_STEP,
-				ZOOM_MIN, ZOOM_MAX
-			)
-		end),
-
-		------------------------------------------------------------------------
-		-- Focus lost
-		------------------------------------------------------------------------
-		InputService.WindowFocusReleased:Connect(function()
-			if self.IsFreeLook then
-				exitFreeLook(self, LocalPlayer.Character)
-			end
-		end),
-
-		------------------------------------------------------------------------
-		-- Character respawn
-		------------------------------------------------------------------------
-		LocalPlayer.CharacterAdded:Connect(function(newCharacter)
-			self.IsFirstPerson       = false
-			self.FreeLookRMB         = false
-			self.FreeLookDebounce    = false
-			self.FirstPersonDebounce = false
-			self.ShoulderDebounce    = false
-			self.RecoilPitch         = 0
-			self.RecoilYaw           = 0
-			self.IsAiming            = false
-			self.IsHoldBreath        = false
-			self.DeathSubject        = nil
-			self.DeathOrbitYaw       = 0
-			self.DeathOrbitPitch     = 0
-			self.TransparencyCache   = {}
-			cancelHoldBreathTweens()
-			if activeFOVTween then activeFOVTween:Cancel() end
-			exitFreeLook(self, newCharacter)
-
-			local r = newCharacter:WaitForChild("HumanoidRootPart")
-			self.CameraYaw     = yawFromLook(r.CFrame.LookVector)
-			self.CameraPitch   = 0
-			self.FreeLookYaw   = self.CameraYaw
-			self.FreeLookPitch = 0
-			self.SmoothedPos   = r.Position + Vector3.new(0, getOffset("heightOffset", DEFAULT_HEIGHT), 0)
-
-			connectCharacterAttributes(newCharacter)
-		end),
-
-		LocalPlayer.Character:WaitForChild("Humanoid").Died:Connect(function()
-			-- restore transparency on death
-			local char = LocalPlayer.Character
-			if char and self.IsFirstPerson then
-				self._showCharacter(char)
-			end
-			self.IsFirstPerson = false
-
-			local bodies = Workspace:FindFirstChild("Game_Details") and Workspace.Game_Details:FindFirstChild("Bodies")
-			if not bodies then return end
-
-			local dead_body = bodies:FindFirstChild(LocalPlayer.Name)
-			if not dead_body then
-				local conn
-				conn = bodies.ChildAdded:Connect(function(child)
-					if child.Name == LocalPlayer.Name then
-						conn:Disconnect()
-						self.DeathSubject       = child
-						self.DeathOrbitYaw      = self.CameraYaw
-						self.DeathOrbitPitch    = math.rad(-20)
-						self.DeathOrbitDistance = 8
-					end
-				end)
-			else
-				self.DeathSubject       = dead_body
-				self.DeathOrbitYaw      = self.CameraYaw
-				self.DeathOrbitPitch    = math.rad(-20)
-				self.DeathOrbitDistance = 8
 			end
 		end),
 	}
+
+	Shoulder_Switch:GetPropertyChangedSignal("Value"):Connect(function()
+		shoulder_switch_key = resolveKeyFromString(Shoulder_Switch.Value)
+	end)
+
+	First_Person:GetPropertyChangedSignal("Value"):Connect(function()
+		first_person_key = resolveKeyFromString(First_Person.Value)
+	end)
+	
+	Free_Look:GetPropertyChangedSignal("Value"):Connect(function()
+		free_look_key = resolveKeyFromString(Free_Look.Value)
+	end)
 end
-
-------------------------------------------------------------------------
--- ApplyRecoil
-------------------------------------------------------------------------
-
-function BaseCamera:ApplyRecoil(pitchDelta: number, yawDelta: number)
-	self.RecoilPitch += pitchDelta
-	self.RecoilYaw   += yawDelta
-end
-
-------------------------------------------------------------------------
--- Update
-------------------------------------------------------------------------
-
-function BaseCamera:Update(dt: number)
-
-	local sensitivity = getOffset("rotationSpeed", 0.25) * 1.35
-	local delta = InputService:GetMouseDelta()
-	self._mouseDelta = delta
-
-	------------------------------------------------------------------------
-	-- Death spectate
-	------------------------------------------------------------------------
-	if self.DeathSubject then
-		local subjectPos
-		if self.DeathSubject:IsA("Model") then
-			subjectPos = self.DeathSubject.PrimaryPart
-				and self.DeathSubject.PrimaryPart.Position
-				or getHeadPos(self.DeathSubject)
-		else
-			subjectPos = self.DeathSubject.Position
-		end
-
-		self.DeathOrbitYaw   += math.rad(-delta.X * sensitivity)
-		self.DeathOrbitPitch += math.rad(-delta.Y * sensitivity)
-		self.DeathOrbitPitch  = math.clamp(self.DeathOrbitPitch, PITCH_MIN, PITCH_MAX)
-
-		local rot        = CFrame.Angles(0, self.DeathOrbitYaw, 0) * CFrame.Angles(self.DeathOrbitPitch, 0, 0)
-		local desiredPos = subjectPos - rot.LookVector * self.DeathOrbitDistance
-		self.SmoothedPos = lerpVec(self.SmoothedPos, desiredPos, CAM_SMOOTH_SPEED, dt)
-
-		Camera.CFrame = CFrame.new(self.SmoothedPos)
-			* CFrame.Angles(0, self.DeathOrbitYaw, 0)
-			* CFrame.Angles(self.DeathOrbitPitch, 0, 0)
-		return
-	end
-
-	local character = LocalPlayer.Character
-	if not character then return end
-
-	local root     = character:FindFirstChild("HumanoidRootPart")
-	local humanoid = character:FindFirstChildOfClass("Humanoid")
-	if not root or not humanoid then return end
-
-	self.RaycastParams.FilterDescendantsInstances = {character}
-
-	local heightOffset = getOffset("heightOffset", DEFAULT_HEIGHT)
-	local sensitivity  = getOffset("rotationSpeed", 0.25)
-	local delta        = self._mouseDelta
-
-	--------------------------------------------------------------------
-	-- 1. Mouse delta → angles
-	--------------------------------------------------------------------
-
-	if self.IsFreeLook then
-		humanoid.AutoRotate = true
-		if self.FreeLookPhase == "orbiting" then
-			local freeLookSensitivity = sensitivity * 1.2
-
-			self.FreeLookYaw += math.rad(-delta.X * freeLookSensitivity)
-			self.FreeLookPitch += math.rad(-delta.Y * freeLookSensitivity)
-			self.FreeLookPitch  = math.clamp(self.FreeLookPitch, PITCH_MIN, PITCH_MAX)
-		end
-	else
-		humanoid.AutoRotate = false
-		self.CameraYaw   += math.rad(-delta.X * sensitivity)
-		self.CameraPitch += math.rad(-delta.Y * sensitivity)
-		self.CameraPitch  = math.clamp(self.CameraPitch, PITCH_MIN, PITCH_MAX)
-		local look = Camera.CFrame.LookVector
-		self.FreeLookYaw = math.atan2(-look.X, -look.Z)
-		self.FreeLookPitch = math.asin(look.Y)
-	end
-
-	-- Decay recoil
-	self.RecoilPitch = lerp(self.RecoilPitch, 0, RECOIL_DECAY_SPEED, dt)
-	self.RecoilYaw   = lerp(self.RecoilYaw,   0, RECOIL_DECAY_SPEED, dt)
-
-	local activeYaw   = (self.IsFreeLook and self.FreeLookYaw   or self.CameraYaw)
-	local activePitch = (self.IsFreeLook and self.FreeLookPitch or self.CameraPitch) + self.RecoilPitch
-
-	activePitch = math.clamp(activePitch, PITCH_MIN, PITCH_MAX)
-	activeYaw   += self.RecoilYaw
-	
-	if self.IsFreeLook then
-		humanoid.AutoRotate = true
-	else
-		humanoid.AutoRotate = false
-
-		local yaw = self.CameraYaw
-		local current = root.CFrame
-		local targetYaw = self.CameraYaw
-		local currentYaw = yawFromLook(root.CFrame.LookVector)
-
-		local diff = math.atan2(math.sin(targetYaw - currentYaw), math.cos(targetYaw - currentYaw))
-
-		if math.abs(diff) > 0.01 then
-			root.CFrame = CFrame.new(root.Position) * CFrame.Angles(0, targetYaw, 0)
-		end
-	end
-
-	--------------------------------------------------------------------
-	-- 3. Shoulder lerp
-	--------------------------------------------------------------------
-
-	local shoulderAlpha = math.clamp(18 * dt, 0, 1) 
-	self.CurrentShoulder = self.CurrentShoulder + (self.TargetShoulder - self.CurrentShoulder) * shoulderAlpha
-
-	--------------------------------------------------------------------
-	-- 4. Distance & FOV
-	--------------------------------------------------------------------
-
-	self.CurrentDistance = lerp(
-		self.CurrentDistance,
-		math.clamp(self.TargetDistance, ZOOM_MIN, ZOOM_MAX),
-		ZOOM_LERP_SPEED, dt
-	)
-
-	-- Sprint FOV — driven by walkspeed matching the sprint module ramp
-	-- only runs when aiming and hold breath are not controlling FOV
-	if not self.IsAiming and not self.IsHoldBreath then
-		local walkspeed = humanoid.WalkSpeed
-		local t = math.clamp((walkspeed - BASE_WALKSPEED) / (MAX_WALKSPEED - BASE_WALKSPEED), 0, 1)
-		local targetFOV = BASE_FOV + (t * (MAX_FOV - BASE_FOV))
-		Camera.FieldOfView = lerp(Camera.FieldOfView, targetFOV, FOV_SPEED, dt)
-	end
-
-
-	--------------------------------------------------------------------
-	-- 6. Rotation CFrame + focus point
-	--------------------------------------------------------------------
-
-	local rotation   = CFrame.Angles(0, activeYaw, 0) * CFrame.Angles(activePitch, 0, 0)
-	local focusPoint = root.Position + Vector3.new(0, heightOffset, 0)
-	local headPos    = getHeadPos(character)
-
-	--------------------------------------------------------------------
-	-- 7. Desired camera position
-	--------------------------------------------------------------------
-
-	local desiredPos: Vector3
-	local rayOrigin:  Vector3
-
-	if self.IsFirstPerson and not self.IsFreeLook then
-		self.SmoothedPos = headPos -- Keep this updated for seamless transitions
-		Camera.CFrame = CFrame.new(headPos)
-			* CFrame.Angles(0, activeYaw, 0)
-			* CFrame.Angles(activePitch, 0, 0)
-		return
-			
-	elseif self.IsFreeLook then
-		if LocalPlayer.PlayerGui.Aiming.Regular_Crosshair.Visible == true then
-			LocalPlayer.PlayerGui.Aiming.Regular_Crosshair.Visible = false
-		end
-
-		if not LocalPlayer:GetAttribute("FreeLook") then
-			LocalPlayer:SetAttribute("FreeLook", true)
-		end
-
-		if self.FreeLookPhase == "panning" then
-			local headPos = getHeadPos(character)
-			local rotation = CFrame.Angles(0, self.FreeLookYaw, 0) * CFrame.Angles(self.FreeLookPitch, 0, 0)
-
-			self.FreeLookTargetPos = headPos - rotation.LookVector * FREELOOK_ORBIT_DISTANCE
-
-			self.SmoothedPos = self.SmoothedPos:Lerp(
-				self.FreeLookTargetPos,
-				math.clamp(10 * dt, 0, 1)
-			)
-
-			if (self.SmoothedPos - self.FreeLookTargetPos).Magnitude < 0.1 then
-				self.SmoothedPos = self.FreeLookTargetPos
-				self.FreeLookPhase = "orbiting"
-			end
-
-			Camera.CFrame = CFrame.new(self.SmoothedPos)
-				* CFrame.Angles(0, self.FreeLookYaw, 0)
-				* CFrame.Angles(self.FreeLookPitch, 0, 0)
-
-			return
-		end
-
-		desiredPos = headPos - rotation.LookVector * FREELOOK_ORBIT_DISTANCE
-		rayOrigin  = headPos
-
-	else
-		desiredPos = focusPoint
-			+ rotation.RightVector * self.CurrentShoulder
-		- rotation.LookVector  * self.CurrentDistance
-		rayOrigin = focusPoint
-	end
-
-	--------------------------------------------------------------------
-	-- 8. Collision
-	--------------------------------------------------------------------
-
-	local finalPos = desiredPos
-
-	if not self.IsFirstPerson then
-		local ray = Workspace:Raycast(rayOrigin, desiredPos - rayOrigin, self.RaycastParams)
-		if ray then
-			finalPos = ray.Position + ray.Normal * COLLISION_OFFSET
-		end
-	end
-
-	--------------------------------------------------------------------
-	-- 9. Neck rotation (follows camera pitch)
-	--------------------------------------------------------------------
-
-	local neckC0       = CFrame.new(0, 1, 0, -1, 0, 0, 0, 0, 1, 0, 1, -0)
-	local neckRotation = neckC0 * CFrame.Angles(-math.rad(activePitch * 40), 0, 0)
-	if character:FindFirstChild("Torso") and character.Torso:FindFirstChild("Neck") then
-		character.Torso.Neck.C0 = character.Torso.Neck.C0:Lerp(neckRotation, 0.1)
-	end
-
-	--------------------------------------------------------------------
-	-- 10. Smooth + apply
-	--------------------------------------------------------------------
-	local alpha = 1 - math.exp(-CAM_SMOOTH_SPEED * dt)
-
-	if self.IsFreeLook then
-		self.SmoothedPos = finalPos
-	else
-		self.SmoothedPos = self.SmoothedPos:Lerp(finalPos, alpha)
-	end
-
-	Camera.CFrame = CFrame.new(self.SmoothedPos)
-		* CFrame.Angles(0, activeYaw, 0)
-		* CFrame.Angles(activePitch, 0, 0)
-	
-	updateMouseBehavior(self)
-	
-end
-	
-
-------------------------------------------------------------------------
--- End / Cut
-------------------------------------------------------------------------
 
 function BaseCamera:End()
-	print("[CAMERASERVICE::] Ending camera:", self.name)
-	for _, connection in pairs(self.Connections or {}) do
-		connection:Disconnect()
+	self:_unbind()
+
+	if self._align then
+		self._align:Destroy()
+		self._align = nil
 	end
 
-	-- restore character transparency if in first person
-	local char = LocalPlayer.Character
-	if char and self.IsFirstPerson then
-		self._showCharacter(char)
-	end
-
-	LocalPlayer.PlayerGui.Aiming.Regular_Crosshair.Visible = false
-
-	local camera = Workspace.CurrentCamera
-	if camera then
-		camera.CameraType = Enum.CameraType.Scriptable
-	end
-
-	local player = game.Players.LocalPlayer
-	if player then
-		game:GetService("UserInputService").MouseBehavior    = Enum.MouseBehavior.Default
-		game:GetService("UserInputService").MouseIconEnabled = true
+	if self._alignAttachment then
+		self._alignAttachment:Destroy()
+		self._alignAttachment = nil
 	end
 end
 
 function BaseCamera:Cut()
-	print("[CAMERASERVICE::] Cutting camera:", self.name)
 	self:End()
 end
 
-------------------------------------------------------------------------
--- Init
-------------------------------------------------------------------------
+function BaseCamera:ApplyRecoil(vertical: number, horizontal: number)
+	-- Add to target recoil (not directly to camera)
+	self.RecoilTargetPitch += vertical
+	self.RecoilTargetYaw += horizontal
+end
 
-local myCamera = BaseCamera.new({ name = "BasicCamera", priority = 1, Connections = {} })
-
-BaseCamera.priority = 1
+local myCamera = BaseCamera.new({
+	name = "BaseCamera",
+	priority = 1,
+})
 
 return BaseCamera

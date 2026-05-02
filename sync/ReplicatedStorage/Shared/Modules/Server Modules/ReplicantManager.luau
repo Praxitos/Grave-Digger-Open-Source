@@ -2,6 +2,7 @@ local module = {}
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Debris = game:GetService("Debris")
+local player_service = game:GetService("Players")
 
 local replicant_folder = ReplicatedStorage.Shared.Library.Events.Replicant_Communication
 
@@ -14,8 +15,13 @@ local heal_connection = replicant_folder.Heal_Connection
 
 local status_connection = replicant_folder.Parent.Status_Communication.Status_Connection
 
+local gun_communication = replicant_folder.Parent.Gun_Communication
+local drop_connection = gun_communication.Drop_Connection
+
 
 local status_service = require(script.Parent.StatusService)
+
+local item_service = require(script.Parent.ItemsService)
 
 local function getModelFromInstance(instance: Instance)
 	if not instance then return nil end
@@ -126,7 +132,15 @@ function module.start_module()
 	end)
 	
 	heal_connection.OnServerEvent:Connect(function(sender, healed, wound)
+		if not healed:IsA("Player") then
+			local player = game.Players:GetPlayerFromCharacter(healed)
+			if not player then return end
+			healed = player
+		end
+		
+		
 		status_service.remove_status(healed, "WoundStatus")
+		status_service.remove_status(healed, "ConcussionStatus")
 		healed.Character.Humanoid.Health = 100
 	end)
 	
@@ -138,6 +152,45 @@ function module.start_module()
 		end
 	end)
 
+	drop_connection.OnServerEvent:Connect(function(player, tool, model, remove_tool: boolean)
+		print("Received drop_connection from", player.Name, "for tool:", tool, "model:", model.Name, "remove_tool:", remove_tool)
+		
+		if not player or not model then 
+			warn("[ReplicantManager::] Invalid player or model in drop_connection")
+		end
+		
+		if remove_tool == true then
+			item_service.remove_item(player, model.Name)
+			print("Removed tool from player:", player.Name)
+		end
+		
+		local model_clone = model:Clone()
+		model_clone.Parent = workspace
+		
+		local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+
+		if root and model_clone.PrimaryPart then
+			-- Move the clone slightly in front of the player
+			local spawnOffset = root.CFrame.LookVector * 3 -- distance in studs
+			local spawnCFrame = root.CFrame + spawnOffset
+
+			model_clone:PivotTo(spawnCFrame)
+
+			model_clone.PrimaryPart.CanCollide = true
+
+			local forward = root.CFrame.LookVector
+			local upward = root.CFrame.UpVector
+
+			local force = (forward * 10) + (upward * 5)
+
+			local velocity = Instance.new("BodyVelocity")
+			velocity.Velocity = force
+			velocity.MaxForce = Vector3.new(1e5, 1e5, 1e5)
+			velocity.Parent = model_clone.PrimaryPart
+
+			game:GetService("Debris"):AddItem(velocity, 0.25)
+		end
+	end)
 end
 
 return module

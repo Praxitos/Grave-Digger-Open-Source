@@ -93,7 +93,9 @@ function module.give_item(player: Player, item: string)
 		tool.Unequipped:Connect(function()
 			string_value.Value = true
 			
-			player.Character.CharacterData.Equipment:FindFirstChild(object.model_reference.Name):Destroy()
+			if player.Character.CharacterData.Equipment:FindFirstChild(object.model_reference.Name) then
+				player.Character.CharacterData.Equipment:FindFirstChild(object.model_reference.Name):Destroy()
+			end
 		end)
 	end
 	
@@ -105,46 +107,76 @@ end
 
 function module.remove_item(player: Player, item: string)
 
-    local backpack = player:FindFirstChild("Backpack")
-    local character = player.Character
+	local backpack = player:FindFirstChild("Backpack")
+	local character = player.Character
 
-    local removed = false
+	local removed = false
 
-    --  Remove from Backpack
-    if backpack then
-        local tool = backpack:FindFirstChild(item)
-        if tool then
-            tool:Destroy()
-            removed = true
-        end
-    end
+	-- Remove from Backpack
+	if backpack then
+		local tool = backpack:FindFirstChild(item)
+		if tool then
+			tool:Destroy()
+			removed = true
+		end
+	end
 
-    --  Remove if currently equipped
-    if character then
-        local tool = character:FindFirstChild(item)
-        if tool then
-            tool:Destroy()
-            removed = true
-        end
-    end
+	-- Remove if currently equipped
+	if character then
+		local tool = character:FindFirstChild(item)
+		if tool then
+			character.Humanoid:UnequipTools()
+			tool:Destroy()
+			removed = true
+		end
 
-    -- Remove holster reference
-    local holsters_folder = player:FindFirstChild("GameData")
-        and player.GameData:FindFirstChild("Accessorys")
-        and player.GameData.Accessorys:FindFirstChild("Holsters")
+	
+		for _, descendant in ipairs(character:GetDescendants()) do
+			if descendant:IsA("Motor6D") then
+				if descendant.Name == "ToolMotor" or descendant.Name == "Round_Motor6d" then
+					descendant:Destroy()
+				end
+			end
+		end
 
-    if holsters_folder then
-        local holster_value = holsters_folder:FindFirstChild(item .. "Holster")
-        if holster_value then
-            holster_value:Destroy()
-        end
-    end
+		
+		local equipmentFolder = character:FindFirstChild("CharacterData")
+			and character.CharacterData:FindFirstChild("Equipment")
 
-    if removed then
-        return "Successfully removed item."
-    else
-        return "Item not found."
-    end
+		if equipmentFolder then
+			local model = equipmentFolder:FindFirstChild(item)
+			if model then
+				model:Destroy()
+			end
+		end
+
+	
+		local rightArm = character:FindFirstChild("Right Arm")
+		if rightArm then
+			local round = rightArm:FindFirstChild("Round") -- adjust if different name
+			if round then
+				round:Destroy()
+			end
+		end
+	end
+
+	-- Remove holster reference
+	local holsters_folder = player:FindFirstChild("GameData")
+		and player.GameData:FindFirstChild("Accessorys")
+		and player.GameData.Accessorys:FindFirstChild("Holsters")
+
+	if holsters_folder then
+		local holster_value = holsters_folder:FindFirstChild(item .. "Holster")
+		if holster_value then
+			holster_value:Destroy()
+		end
+	end
+
+	if removed then
+		return "Successfully removed item."
+	else
+		return "Item not found."
+	end
 end
 
 function module.start_module()

@@ -14,6 +14,7 @@ return {
 			["First Person"] = "Enum.KeyCode.V",
 			["Sprint"] = "Enum.KeyCode.LeftShift",
 			["Crouch"] = "Enum.KeyCode.C",
+			["Emergency Drop"] = "Enum.KeyCode.T"
 		},
 	},
 
