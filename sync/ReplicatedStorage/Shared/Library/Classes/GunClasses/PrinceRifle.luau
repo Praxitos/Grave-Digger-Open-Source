@@ -31,7 +31,7 @@ local FX_MUZZLE_FLASH = FxFolder.Muzzle_Flash
 -- Tuning
 --------------------------------------------------------------------------------
 
-local CYCLE_REST_TIME = 0.15
+local CYCLE_REST_TIME = 1
 local FIRE_RATE       = 0.30
 local BULLET_SPEED    = 1000
 
@@ -255,15 +255,15 @@ end
 
 function PrinceRifle:cycle()
 	if self.Cycling then return end
+	if self.Alt_Mode then return end
 	self.Cycling = true
 
 	local anims = self.RegisteredAnimations
 	if not anims then self.Cycling = false; print("Anims not found.") return end
 
 	self:_stopAllExcept()
-	anims.Cycle:Play(0, 1, 1)
-	anims.Cycle.Stopped:Once(function()
-		task.wait(CYCLE_REST_TIME)
+	anims.Cycle:Play(0.15)
+	task.delay(CYCLE_REST_TIME, function()
 
 		self.Cycled  = true
 		self.Cycling = false  
@@ -405,7 +405,7 @@ function PrinceRifle:reload()
 	else
 		for _, name in ipairs({ "Reload_Loop", "Reload_Start", "Reload_Empty" }) do
 			local t = anims[name]
-			if t and t.IsPlaying then t:Stop(0) end
+			if t and t.IsPlaying then t:Stop(0.15) end
 		end
 	end
 
