@@ -37,7 +37,7 @@ local MOTOR_LERP_ALPHA = 0.15
 local MOTOR_SNAP_DIST  = 0.001
 
 -- Hard-cut blend time. 0 = instant cuts.
-local CUT = 0
+local CUT = 0.15
 
 --------------------------------------------------------------------------------
 -- Penetration profiles
@@ -248,7 +248,7 @@ function BaseTool:equip()
 			if self.Aiming then
 				local aimTrack = self:_aimTrack()
 				if aimTrack and not aimTrack.IsPlaying then
-					aimTrack:Play()
+					aimTrack:Play(0.3)
 				end
 				return
 			end
@@ -284,7 +284,11 @@ function BaseTool:unequip()
 	humanoid:UnequipTools()
 
 	if self.RegisteredAnimations and self.RegisteredAnimations.Unequip then
-		self.RegisteredAnimations.Unequip:Play()
+		if self.Emergency_Drop == true then
+			self.RegisteredAnimations.Drop:Play()
+		else
+			self.RegisteredAnimations.Unequip:Play()
+		end
 		if self.unequip_wait == true then
 			self.RegisteredAnimations.Unequip.Stopped:Wait()
 		end
@@ -360,7 +364,7 @@ function BaseTool:_playAnim(name: string): AnimationTrack?
 		end
 	end
 
-	track:Play()
+	track:Play(0.3)
 	return track
 end
 
@@ -512,7 +516,7 @@ function BaseTool:aim()
 	self:_killAimTracks()
 	if anims.Hold and anims.Hold.IsPlaying then anims.Hold:Stop(CUT) end
 	local aimTrack = self:_aimTrack()
-	if aimTrack then aimTrack:Play() end
+	if aimTrack then aimTrack:Play(0.3) end
 	local char = LOCAL_PLAYER.Character
 	if char then char:SetAttribute("Aiming", true) end
 
@@ -539,7 +543,7 @@ function BaseTool:endAiming()
 		self:_killAimTracks()
 		if not self:_isBusy() then
 			if anims.Hold and not anims.Hold.IsPlaying then
-				anims.Hold:Play()
+				anims.Hold:Play(0.3)
 			end
 		end
 	end
@@ -1186,6 +1190,7 @@ function BaseTool:drop()
 	print("Emergency dropping...")
 	drop_connection:FireServer(self.className, self.model_reference, true)
 	self:destroy()
+	self.Emergency_Drop = true
 end
 
 --------------------------------------------------------------------------------
