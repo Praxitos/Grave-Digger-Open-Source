@@ -41,6 +41,10 @@ local SprintRampTime     = 2
 local Sprinting   = false
 local LoopRunning = false
 local SprintTicker = 0 
+local HoldingBreath = false
+local IsJumping = true
+local fall_time = tick()
+local fall_threshold = 0.35
 
 local KeyStates = {
 	Forward   = false,
@@ -48,6 +52,7 @@ local KeyStates = {
 	Left      = false,
 	Right     = false,
 }
+
 
 -- // Helpers
 local function getKeyName(value: string): string
@@ -76,8 +81,10 @@ local function setHoldBreathe(holding: boolean)
 	if not Character then return end
 	if holding then
 		Character:SetAttribute("HoldBreathe", true)
+		HoldingBreath = true
 	else
 		Character:SetAttribute("HoldBreathe", nil)
+		HoldingBreath = false
 	end
 end
 
@@ -104,6 +111,15 @@ local function sprintLoop()
 
 	while Sprinting do
 		if not Character or not Humanoid or not RootPart then break end
+		if (tick() - fall_time) < fall_threshold then
+			Sprinting = false
+			resetSpeed()
+			break
+		end
+		
+		if not Character or not Humanoid or not RootPart then break end
+		
+		
 		
 		if Character:GetAttribute("Crouching") then
 			break
@@ -136,9 +152,18 @@ local function sprintLoop()
 			setSprintAttribute(false)
 		end
 
+		-- Velocity check - stop sprint if moving backwards too fast
+		local velocity = RootPart.CFrame:vectorToObjectSpace(RootPart.AssemblyLinearVelocity)
+
+		if velocity.Z > 2 then
+			Sprinting = false
+			resetSpeed()
+			break
+		end
+		
 		-- Velocity check
 		local velocity = RootPart.AssemblyLinearVelocity.Magnitude
-		if math.abs(velocity - Humanoid.WalkSpeed) > 2 then
+		if math.abs(velocity - Humanoid.WalkSpeed) > 5 and velocity < Humanoid.WalkSpeed then
 			Sprinting = false
 			resetSpeed()
 			break
@@ -160,6 +185,10 @@ function module.start_module()
 		if gameProcessed then return end
 
 		if input.KeyCode == getSprintKey() then
+			if (tick() - fall_time) < fall_threshold then
+				return
+			end
+
 			Sprinting = true
 			task.spawn(sprintLoop)
 		end
@@ -204,13 +233,24 @@ function module.start_module()
 	
 	Humanoid.StateChanged:Connect(function(old, new)
 		if new == Enum.HumanoidStateType.Jumping then
+			LocalPlayer:SetAttribute("Jumping", true)
 			Humanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping, false)
-			print("jumped")
-			
+			IsJumping = true
+			fall_time = tick() -- start air timer immediately on jump
+
 			task.delay(1, function()
-				print("enabled")
+				if Character:GetAttribute("Crouching") then return end
 				Humanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping, true)
 			end)
+
+		elseif new == Enum.HumanoidStateType.Freefall then
+			IsJumping = true
+			fall_time = tick()
+
+		elseif new == Enum.HumanoidStateType.Landed then
+			LocalPlayer:SetAttribute("Jumping", nil)
+			IsJumping = false
+			fall_time = tick() 
 		end
 	end)
 	
@@ -220,6 +260,20 @@ function module.start_module()
 		task.delay(1, function()
 			Humanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping, true)
 		end)
+	end)
+	
+	Character:GetAttributeChangedSignal("Aiming"):Connect(function()
+		if not Character:GetAttribute("Aiming") and HoldingBreath == true then
+			setHoldBreathe(false)
+		end
+	end)
+	
+	Character:GetAttributeChangedSignal("Crouching"):Connect(function()
+		if Character:GetAttribute("Crouching") then
+			Humanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping, false)
+		else
+			Humanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping, true)
+		end
 	end)
 end
 
