@@ -326,8 +326,8 @@ local function update_movement(speed: number)
 					play_overlay(sprint_arms_overlay())
 				end
 				
-				-- // if sprinting and sprint_animation is set to nil, stop sprint arms and return to base sprint
-				if character:GetAttribute("Sprint_Animation") == nil then
+				if character:GetAttribute("Sprint_Animation") == nil and current_state == "SPRINT" then
+					print("Sprint_Animation")
 					clear_overlays()
 					play_base("Sprinting_Full")
 					play_overlay("Sprint_Lean")
