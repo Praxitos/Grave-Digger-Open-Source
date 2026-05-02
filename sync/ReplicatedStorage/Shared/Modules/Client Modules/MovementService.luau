@@ -233,13 +233,15 @@ function module.start_module()
 	
 	Humanoid.StateChanged:Connect(function(old, new)
 		if new == Enum.HumanoidStateType.Jumping then
+			if Character:GetAttribute("Crouching") then 
+				Character:SetAttribute("Crouching", nil)
+			end
+			
 			LocalPlayer:SetAttribute("Jumping", true)
 			Humanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping, false)
 			IsJumping = true
 			fall_time = tick() -- start air timer immediately on jump
-
 			task.delay(1, function()
-				if Character:GetAttribute("Crouching") then return end
 				Humanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping, true)
 			end)
 
@@ -265,14 +267,6 @@ function module.start_module()
 	Character:GetAttributeChangedSignal("Aiming"):Connect(function()
 		if not Character:GetAttribute("Aiming") and HoldingBreath == true then
 			setHoldBreathe(false)
-		end
-	end)
-	
-	Character:GetAttributeChangedSignal("Crouching"):Connect(function()
-		if Character:GetAttribute("Crouching") then
-			Humanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping, false)
-		else
-			Humanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping, true)
 		end
 	end)
 end
