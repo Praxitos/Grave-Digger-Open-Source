@@ -9,6 +9,7 @@
 --------------------------------------------------------------------------------
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService =  game:GetService("UserInputService")
 
 local Types    = require(script.Parent.Parent.Parent.Types)
 local BaseTool = require(script.Parent.Parent.BaseTool)
@@ -60,6 +61,8 @@ local ANIM_LAYERS: { [string]: number } = {
 	Reload_Alt   = 2,
 	Alt_Mode_On  = 2,
 	Alt_Mode_Off = 2,
+	Melee1  = 2,
+	Melee2  = 2,
 }
 
 --------------------------------------------------------------------------------
@@ -91,6 +94,8 @@ export type PrinceRifle = typeof(setmetatable({} :: {
 	Armor_Penetration_Level: number,
 	KnockBack_Force:         number,
 	Aiming_Number:           number,
+	Check_Delay: 			 number,
+	MuzzlePartName:          string,
 
 	Aiming:    boolean,
 	Cycled:    boolean,
@@ -99,6 +104,7 @@ export type PrinceRifle = typeof(setmetatable({} :: {
 	Reloading: boolean,
 	Alt_Mode:  boolean,
 	Alting:    boolean,
+	Checking: boolean,
 
 	_reloadCancelled: boolean,
 
@@ -159,6 +165,9 @@ function PrinceRifle.new(info: Types.BaseToolCreateInfo): PrinceRifle
 		Alt_Mode_Off = AnimFolder.PrinceRifle_Alt_Mode_Off,
 
 		Check = AnimFolder.PrinceRifle_Check,
+
+		Melee1 = AnimFolder.PrinceRifle_Melee1,
+		Melee2 = AnimFolder.PrinceRifle_Melee2,
 	}
 
 	self.damage                  = 105
@@ -171,8 +180,11 @@ function PrinceRifle.new(info: Types.BaseToolCreateInfo): PrinceRifle
 	self.Armor_Penetration_Level = 3
 	self.KnockBack_Force         = 10
 	self.Aiming_Number           = 100
+	self.Check_Delay			 = 1
+	self.MuzzlePartName          = "PrinceRifle_Muzzle"
+	self.Can_Drop 				 = true
 
-	self.unequip_wait     = true
+	self.unequip_wait     = false
 	self.Cycled           = true
 	self.Firing           = false
 	self.Cycling          = false
@@ -180,20 +192,9 @@ function PrinceRifle.new(info: Types.BaseToolCreateInfo): PrinceRifle
 	self.Alt_Mode         = false
 	self.Alting           = false
 	self._reloadCancelled = false
-
-	self.Caster, self.CasterBehavior = Util.setupFastCast({
-		bulletTemplate  = FxFolder.Bullet,
-		bulletContainer = workspace.Game_Details.Effects.Bullets,
-		onHit           = function(cast, result, velocity)
-			self:_onBulletHit(
-				cast, result, velocity,
-				self.actual_model and self.actual_model:FindFirstChild("PrinceRifle_Muzzle"),
-				self.Penetration_Level,
-				self.damage,
-				self.KnockBack_Force
-			)
-		end,
-	})
+	self.Checking		  = false
+	self.Check_Delayed 	  = false
+	self.Meleeing		  = false
 
 	self:_initShoulderTracking()
 
@@ -210,7 +211,7 @@ function PrinceRifle:_getKeyBindings()
 	return base
 end
 
--- Called by BaseTool._connectInput when the F key is pressed.
+-- Called by BaseTool._connectInput when Q is pressed.
 function PrinceRifle:AltMode()
 	self:setAltMode()
 end
@@ -255,17 +256,18 @@ function PrinceRifle:cycle()
 	self.Cycling = true
 
 	local anims = self.RegisteredAnimations
-	if not anims then self.Cycling = false; return end
+	if not anims then self.Cycling = false; print("Anims not found.") return end
 
 	self:_stopAllExcept()
 	anims.Cycle:Play(0, 1, 1)
 	anims.Cycle.Stopped:Once(function()
+		task.wait(CYCLE_REST_TIME)
+
+		self.Cycled  = true
+		self.Cycling = false  
+
 		self:_restoreBase()
 	end)
-	task.wait(CYCLE_REST_TIME)
-
-	self.Cycled  = true
-	self.Cycling = false
 end
 
 function PrinceRifle:fire()
@@ -276,22 +278,45 @@ function PrinceRifle:fire()
 	if self.Firing then return end
 	self.Firing = true
 
-	local muzzle = self.actual_model and self.actual_model:FindFirstChild("PrinceRifle_Muzzle")
-	if not muzzle or self:_if_sprinting() then
+	if self:_if_sprinting() then
 		self.Firing = false
 		return
 	end
 
-	local direction = muzzle.CFrame.LookVector.Unit
-	local shootDir  = game.Players.LocalPlayer:GetAttribute("FreeLook")
-		and direction
-		or workspace.CurrentCamera.CFrame.LookVector.Unit
+	local muzzle = self.actual_model and self.actual_model:FindFirstChild(self.MuzzlePartName)
+	if not muzzle then
+		self.Firing = false
+		return
+	end
+
+	local camera = workspace.CurrentCamera
+	if not camera then
+		self.Firing = false
+		return
+	end
+
+	-- === AIMLOGIC ===
+
+	local mousePos = UserInputService:GetMouseLocation()
+	local ray = camera:ViewportPointToRay(mousePos.X, mousePos.Y)
+
+	local raycastParams = RaycastParams.new()
+	raycastParams.FilterType = Enum.RaycastFilterType.Exclude
+	raycastParams.FilterDescendantsInstances = { game.Players.LocalPlayer.Character }
+
+	local result = workspace:Raycast(ray.Origin, ray.Direction * 1000, raycastParams)
+
+	local targetPos = result and result.Position or (ray.Origin + ray.Direction * 1000)
+
+	local shootDir = (targetPos - muzzle.Position).Unit
+
+	-- === FIRE ===
 
 	local activeCast = self.Caster:Fire(muzzle.Position, shootDir, BULLET_SPEED, self.CasterBehavior)
-	activeCast.UserData.Direction  = direction
+	activeCast.UserData.Direction  = shootDir
 	activeCast.UserData.Penetrated = false
 
-	self:_connect_FastCast(muzzle.Position, direction, BULLET_SPEED, {
+	self:_connect_FastCast(muzzle.Position, shootDir, BULLET_SPEED, {
 		bulletTemplate  = FxFolder.Bullet,
 		bulletContainer = workspace.Game_Details.Effects.Bullets,
 	})
@@ -305,16 +330,8 @@ function PrinceRifle:fire()
 
 	Util.applyRecoil(self.recoil, self.recoil_count, 10, false)
 
-	local muzzleEquipped = game.Players.LocalPlayer.Character
-		.CharacterData.Equipment.PrinceRifle.PrinceRifle_Muzzle
-	self:emit_effect(
-		FX_MUZZLE_FLASH,
-		muzzleEquipped.CFrame * CFrame.new(-0.1, 0, -2),
-		{ "smoke_medium", "smoke_forward", "flash_general" },
-		muzzleEquipped,
-		1,
-		false
-	)
+	-- Muzzle flash
+	self:_fireMuzzleFlash()
 
 	task.wait(FIRE_RATE)
 	self.Firing = false
@@ -323,6 +340,19 @@ function PrinceRifle:fire()
 	if self.Alt_Mode then
 		self:_altReload()
 	end
+end
+
+function PrinceRifle:melee()
+	if self.Meleeing then return end
+	self.Meleeing = true
+	local random_animation = math.random(1, 2)
+
+	local anims = self.RegisteredAnimations
+	self:_stopAllExcept()
+	anims["Melee"..random_animation]:Play()
+	anims["Melee"..random_animation].Stopped:Wait()
+	self.Meleeing = false
+	self:_restoreBase()
 end
 
 function PrinceRifle:_altReload()
@@ -391,9 +421,18 @@ function PrinceRifle:activate()
 		return
 	end
 
-	if not self.Aiming then return end
+	if self.Aiming then
+		if self.Cycling then 
+			print("Cycling, cancelling activate")
+			return
+		else
+			print("Activating, self.Cycling is:", self.Cycling)
+		end
 
-	task.spawn(function() self:fire() end)
+		task.spawn(function() self:fire() end)
+	else
+		self:melee()
+	end
 end
 
 --------------------------------------------------------------------------------
@@ -408,6 +447,18 @@ function PrinceRifle:_on_equip()
 
 	local char = game.Players.LocalPlayer.Character
 	char:SetAttribute("Sprint_Animation", "PrinceRifle")
+
+	-- Setup FastCast
+	self:_setupFastCast(FxFolder, function(cast, result, velocity)
+		local muzzle = self.actual_model and self.actual_model:FindFirstChild(self.MuzzlePartName)
+		self:_onBulletHit(
+			cast, result, velocity,
+			muzzle,
+			self.Penetration_Level,
+			self.damage,
+			self.KnockBack_Force
+		)
+	end)
 
 	-- Keyframe-driven round visibility
 	for _, track in pairs(self.RegisteredAnimations) do
