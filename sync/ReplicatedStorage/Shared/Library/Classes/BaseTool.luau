@@ -26,6 +26,9 @@ local vfx_cast_event            = events_replication_folder.VFX_Connection
 local sfx_cast_event            = events_replication_folder.SFX_Connection
 local texture_event             = events_replication_folder.Texture_Connection
 
+local gun_communication = events_replication_folder.Parent.Gun_Communication
+local drop_connection = gun_communication.Drop_Connection
+
 -- // Tuning (shared defaults; subclasses can override on self)
 
 local AIM_PITCH_LIMIT  = math.rad(60)
@@ -107,6 +110,14 @@ export type BaseTool = typeof(setmetatable({} :: {
 	_inputEndedConn:       RBXScriptConnection?,
 	_shoulderChangedConn:  RBXScriptConnection?,
 	character_connection:  RBXScriptConnection?,
+
+	-- fastcast
+	Caster:         any?,
+	CasterBehavior: any?,
+
+	-- equipped state
+	Equipped:  boolean?,
+	Equipping: boolean?,
 }, {} :: typeof(BaseTool)))
 
 --------------------------------------------------------------------------------
@@ -136,12 +147,20 @@ function BaseTool.new(BaseToolCreateInfo: Types.BaseToolCreateInfo): BaseTool
 	self.Alting    = false
 	self.Spinning  = false
 
+	-- Equipped state
+	self.Equipped  = false
+	self.Equipping = false
+
 	-- Internal connections
 	self._activationConnection = nil
 	self._inputBeganConn       = nil
 	self._inputEndedConn       = nil
 	self._shoulderChangedConn  = nil
 	self._aimConnection        = nil
+
+	-- FastCast (initialized by subclass)
+	self.Caster         = nil
+	self.CasterBehavior = nil
 
 	return self
 end
@@ -187,6 +206,7 @@ end
 function BaseTool:equip()
 	if not self.tool then return end
 	self.Equipped = true
+	self.Equipping = true
 
 	local character = LOCAL_PLAYER.Character
 	if not character then return end
@@ -198,12 +218,17 @@ function BaseTool:equip()
 	if self._on_equip then
 		self:_on_equip() 
 	end
-	
+
 	if self.RegisteredAnimations then
 		local draw = self.RegisteredAnimations.Draw
 		local hold = self.RegisteredAnimations.Hold
 		if draw then draw:Play() end
-		if hold then draw.Stopped:Connect(function() if hold and self.tool and self.tool.Parent == character then hold:Play() end end) end
+		if hold then draw.Stopped:Connect(function() 
+				if hold and self.tool and self.tool.Parent == character and self.Equipped then 
+					hold:Play() 
+					self.Equipping = false 
+				end 
+			end) end
 	end
 
 	if self.model_reference then
@@ -219,7 +244,7 @@ function BaseTool:equip()
 			self:_stopAllExcept()
 		else
 			if not self.Equipped then return end
-			
+
 			if self.Aiming then
 				local aimTrack = self:_aimTrack()
 				if aimTrack and not aimTrack.IsPlaying then
@@ -237,6 +262,8 @@ end
 function BaseTool:unequip()
 	if not self.tool then return end	
 
+	self.Equipped = false
+
 	local character = LOCAL_PLAYER.Character
 	if not character then return end
 
@@ -253,6 +280,7 @@ function BaseTool:unequip()
 		end
 	end
 
+	self:_disable_aiming_ui()
 	humanoid:UnequipTools()
 
 	if self.RegisteredAnimations and self.RegisteredAnimations.Unequip then
@@ -263,6 +291,7 @@ function BaseTool:unequip()
 	end
 
 	self.actual_model = nil
+	if LOCAL_PLAYER.Character then LOCAL_PLAYER.Character:SetAttribute("Aiming", nil) end
 end
 
 --------------------------------------------------------------------------------
@@ -299,7 +328,13 @@ end
 -- Layer-aware animation player. Requires self.ANIM_LAYERS to be defined.
 -- Playing a layer-N track stops all other tracks at layer <= N (for N==max it stops all).
 -- Falls back to a simple track:Play() when ANIM_LAYERS is absent.
-function BaseTool:_playAnim(name: string): AnimationTrack
+-- GUARD: Checks Equipped state to prevent animations after unequip.
+function BaseTool:_playAnim(name: string): AnimationTrack?
+	if not self.Equipped then
+		warn(self.className .. ":_playAnim called while not equipped: " .. name)
+		return nil
+	end
+
 	local anims = self.RegisteredAnimations
 	assert(anims, self.className .. ":_playAnim called before animations were registered")
 
@@ -355,6 +390,13 @@ function BaseTool:_aimTrack(): AnimationTrack?
 	return (self.current_shoulder == "Right") and anims.Aim or anims.Aim_Left
 end
 
+-- Returns the correct fire AnimationTrack for the current shoulder, or nil.
+function BaseTool:_getFireAnim(): AnimationTrack?
+	local anims = self.RegisteredAnimations
+	if not anims then return nil end
+	return (self.current_shoulder == "Right") and anims.Fire or anims.Fire_Left
+end
+
 -- Kills both aim tracks unconditionally.
 function BaseTool:_killAimTracks()
 	local anims = self.RegisteredAnimations
@@ -366,31 +408,61 @@ end
 -- Restores the correct base pose (Hold or Aim) once no busy action is running.
 -- Subclasses can override for more complex layer logic.
 function BaseTool:_restoreBase()
-	if self:_isBusy() then return end
-	if not self.Equipped then return end
+	if self:_isBusy() then
+		return
+	end
+
+	if not self.Equipped then
+		return
+	end
 
 	local anims = self.RegisteredAnimations
-	if not anims then return end
+	if not anims then
+		return
+	end
 
-	-- If the weapon uses ANIM_LAYERS, also bail if any layer >= 1 is still playing.
+	-- Stop all Layer 1 (fire/cycle) animations unconditionally
+	-- These should NOT auto-restore base; they're transient
 	if self.ANIM_LAYERS then
 		for trackName, layer in pairs(self.ANIM_LAYERS) do
-			if layer >= 1 and anims[trackName] and anims[trackName].IsPlaying then
-				return
+			if layer == 1 then
+				local t = anims[trackName]
+				if t and t.IsPlaying then
+					t:Stop(CUT)
+				end
 			end
 		end
 	end
 
 	if self.Aiming then
+
 		local want = self:_aimTrack()
+
+		-- Kill the opposite shoulder aim track
 		local kill = (want == anims.Aim) and anims.Aim_Left or anims.Aim
-		if kill and kill.IsPlaying    then kill:Stop(CUT) end
-		if anims.Hold and anims.Hold.IsPlaying then anims.Hold:Stop(CUT) end
-		if want and not want.IsPlaying then want:Play() end
+
+		if kill and kill.IsPlaying then
+			kill:Stop(CUT)
+		end
+
+		-- Stop Hold if it's playing (shouldn't be, but be safe)
+		if anims.Hold and anims.Hold.IsPlaying then
+			anims.Hold:Stop(CUT)
+		end
+
+		-- Play the correct aim track
+		if want and not want.IsPlaying then
+			want:Play()
+		end
 	else
+
+		-- Kill both aim tracks
 		self:_killAimTracks()
+
+		-- Play Hold
 		if anims.Hold and not anims.Hold.IsPlaying then
 			anims.Hold:Play()
+		else
 		end
 	end
 end
@@ -417,36 +489,51 @@ function BaseTool:_onShoulderChanged()
 	end)
 end
 
+local CAMERA = workspace.CurrentCamera
+local CHARACTER_TRANSPARENCY = 0.95 -- Semi-transparent value
+
 function BaseTool:aim()
 	if self:_if_sprinting() then return end
 	if self.Aiming or self:_isBusy() then return end
-
+	if not self.RegisteredAnimations.Aim then return end
+	
+	if self.Equipping then 
+		print("equipping")
+		return 
+	else
+		print("not equipping")		
+	end
+	if LOCAL_PLAYER:GetAttribute("Jumping") then return end
 	self.Aiming = true
 	self._aimVersion += 1
 	self:_startAimTracking()
-
 	local anims = self.RegisteredAnimations
 	if not anims then return end
-
 	self:_killAimTracks()
 	if anims.Hold and anims.Hold.IsPlaying then anims.Hold:Stop(CUT) end
-
 	local aimTrack = self:_aimTrack()
 	if aimTrack then aimTrack:Play() end
-
 	local char = LOCAL_PLAYER.Character
 	if char then char:SetAttribute("Aiming", true) end
 
 	self:_enable_aiming_ui(self.Aiming_Number or 50)
+
+	-- Start monitoring camera angle for body transparency
+	self:_startTransparencyTracking()
+
+	LOCAL_PLAYER:GetAttributeChangedSignal("Jumping"):Connect(function()
+		if LOCAL_PLAYER:GetAttribute("Jumping") then
+			self:endAiming()
+		end
+	end)
 end
 
 function BaseTool:endAiming()
 	if not self.Aiming then return end
-
 	self.Aiming = false
 	self._aimVersion += 1
 	self:_stopAimTracking()
-
+	self:_stopTransparencyTracking()
 	local anims = self.RegisteredAnimations
 	if anims then
 		self:_killAimTracks()
@@ -456,11 +543,78 @@ function BaseTool:endAiming()
 			end
 		end
 	end
-
 	local char = LOCAL_PLAYER.Character
 	if char then char:SetAttribute("Aiming", nil) end
-
 	self:_disable_aiming_ui()
+
+	-- Reset body transparency
+	self:_resetBodyTransparency()
+end
+
+-- Helper function to start camera angle tracking for transparency
+function BaseTool:_startTransparencyTracking()
+	if self._transparencyConnection then
+		self._transparencyConnection:Disconnect()
+	end
+
+	local char = LOCAL_PLAYER.Character
+	if not char then return end
+
+	self._transparencyConnection = game:GetService("RunService").RenderStepped:Connect(function()
+		if not self.Aiming or not char or not char:FindFirstChild("Humanoid") then
+			return
+		end
+
+		-- Get camera's euler angles and calculate the pitch angle
+		local cameraEulerAngles = CAMERA.CFrame:ToEulerAnglesYXZ()
+		local pitchAngle = math.rad(cameraEulerAngles * 50) -- Multiply by 50 like in GraveDigger
+
+		-- Apply body transparency based on extreme camera angles
+		-- Transparent when aiming very far up (>= 0.43 rad / ~28.2°) or very far down (<= -0.9 rad / ~-59°)
+		if pitchAngle >= 0.43 or pitchAngle <= -0.9 then
+			self:_setBodyTransparency(CHARACTER_TRANSPARENCY)
+		else
+			self:_setBodyTransparency(0)
+		end
+	end)
+end
+
+-- Helper function to stop transparency tracking
+function BaseTool:_stopTransparencyTracking()
+	if self._transparencyConnection then
+		self._transparencyConnection:Disconnect()
+		self._transparencyConnection = nil
+	end
+end
+
+-- Helper function to set body part transparency
+function BaseTool:_setBodyTransparency(transparency)
+	local char = LOCAL_PLAYER.Character
+	if not char then return end
+
+	local bodyParts = {"Torso", "Left Arm", "Right Arm"}
+
+	for _, partName in ipairs(bodyParts) do
+		local part = char:FindFirstChild(partName)
+		if part then
+			part.Transparency = transparency
+		end
+	end
+end
+
+-- Helper function to reset body transparency to normal
+function BaseTool:_resetBodyTransparency()
+	local char = LOCAL_PLAYER.Character
+	if not char then return end
+
+	local bodyParts = {"Torso", "Left Arm", "Right Arm"}
+
+	for _, partName in ipairs(bodyParts) do
+		local part = char:FindFirstChild(partName)
+		if part then
+			part.Transparency = 0
+		end
+	end
 end
 
 --------------------------------------------------------------------------------
@@ -476,6 +630,7 @@ function BaseTool:_getKeyBindings(): { [string]: Enum.KeyCode | Enum.UserInputTy
 		Aim    = Enum.UserInputType.MouseButton2,
 		Reload = Enum.KeyCode.R,
 		Check  = Enum.KeyCode.T,
+		["Emergency Drop"] = Enum.KeyCode.T,
 	}
 end
 
@@ -497,7 +652,13 @@ function BaseTool:_connectInput()
 				elseif action == "Reload" then
 					self:reload()
 				elseif action == "Check" then
-					self:ammo_check()
+
+					if self.Can_Drop == true and self.Reloading == true then
+						self:drop()
+					else
+						self:ammo_check()
+					end
+
 				elseif self[action] and type(self[action]) == "function" then
 					self[action](self)
 				end
@@ -586,21 +747,20 @@ function BaseTool:_startAimTracking()
 		local isFirstPerson = LOCAL_PLAYER:GetAttribute("FirstPerson") == true
 
 		if isFirstPerson then
+			-- In first person: apply full camera rotation (pitch + yaw)
 			local localLook = root.CFrame:VectorToObjectSpace(camCF.LookVector)
-			local pitch = math.asin(localLook.Y)
+			local pitch = math.asin(math.clamp(localLook.Y, -1, 1))
 			local aimAngle = math.clamp(pitch, -pitchLimit, pitchLimit)
 
-			leftShoulder.C0 = leftShoulder.C0:Lerp(
-				self._leftShoulderC0 * CFrame.Angles(0, 0, -aimAngle),
-				lerpAlpha
-			)
+			-- Get yaw from camera relative to root
+			local camRelativeToRoot = root.CFrame:ToObjectSpace(camCF)
+			local _, yaw, _ = camRelativeToRoot:ToEulerAnglesYXZ()
 
-			rightShoulder.C0 = rightShoulder.C0:Lerp(
-				self._rightShoulderC0 * CFrame.Angles(0, 0, aimAngle),
-				lerpAlpha
-			)
+			leftShoulder.C0 = self._leftShoulderC0 * CFrame.Angles(0, yaw, -aimAngle)
+			rightShoulder.C0 = self._rightShoulderC0 * CFrame.Angles(0, yaw, aimAngle)
 
 		else
+			-- In third person: only apply pitch
 			local pitch = camCF:ToEulerAnglesYXZ()
 			local aimAngle = math.clamp(pitch, -pitchLimit, pitchLimit)
 
@@ -758,6 +918,156 @@ function BaseTool:_applyHit(result: RaycastResult, damage: number, direction: Ve
 end
 
 --------------------------------------------------------------------------------
+-- Shared: FastCast setup (NEW METHOD)
+--------------------------------------------------------------------------------
+
+function BaseTool:_setupFastCast(fxFolder: Folder, onHitCallback: (any, RaycastResult, Vector3) -> ())
+	local Util = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Library"):WaitForChild("Util"))
+	self.Caster, self.CasterBehavior = Util.setupFastCast({
+		bulletTemplate  = fxFolder.Bullet,
+		bulletContainer = workspace.Game_Details.Effects.Bullets,
+		onHit           = onHitCallback,
+	})
+end
+
+--------------------------------------------------------------------------------
+-- Shared: projectile firing (NEW METHOD)
+-- Performs camera raycast and fires projectile with standard logic.
+-- Subclass should call this from their fire() method.
+--------------------------------------------------------------------------------
+
+function BaseTool:_fireProjectile(
+	bulletSpeed:      number,
+	penetrationLevel: number,
+	damage:           number,
+	knockbackForce:   number
+): boolean
+	if self:_if_sprinting() then
+		return false
+	end
+
+	local muzzle = self.actual_model and self.actual_model:FindFirstChild(self.MuzzlePartName or "Muzzle")
+	if not muzzle then
+		warn(self.className .. ": Muzzle part not found")
+		return false
+	end
+
+	local camera = workspace.CurrentCamera
+	if not camera then
+		return false
+	end
+
+	-- Raycast from camera to find target
+	local mousePos = UserInputService:GetMouseLocation()
+	local ray = camera:ViewportPointToRay(mousePos.X, mousePos.Y)
+
+	local raycastParams = RaycastParams.new()
+	raycastParams.FilterType = Enum.RaycastFilterType.Exclude
+	raycastParams.FilterDescendantsInstances = { LOCAL_PLAYER.Character }
+
+	local result = workspace:Raycast(ray.Origin, ray.Direction * 1000, raycastParams)
+	local targetPos = result and result.Position or (ray.Origin + ray.Direction * 1000)
+	local shootDir = (targetPos - muzzle.Position).Unit
+
+	-- Fire projectile
+	local activeCast = self.Caster:Fire(muzzle.Position, shootDir, bulletSpeed, self.CasterBehavior)
+	activeCast.UserData.Direction  = shootDir
+	activeCast.UserData.Penetrated = false
+
+	self:_connect_FastCast(muzzle.Position, shootDir, bulletSpeed)
+
+	return true
+end
+
+--------------------------------------------------------------------------------
+-- Shared: muzzle flash effect (NEW METHOD)
+--------------------------------------------------------------------------------
+
+function BaseTool:_fireMuzzleFlash()
+	if not self.actual_model then return end
+
+	local muzzle = self.actual_model:FindFirstChild(self.MuzzlePartName or "Muzzle")
+	if not muzzle then return end
+
+	local fxFolder = ReplicatedStorage.Shared.Assets.Guns.Effects.Shooting
+	self:emit_effect(
+		fxFolder.Muzzle_Flash,
+		muzzle.CFrame * CFrame.new(-0.1, 0, -2),
+		{ "smoke_medium", "smoke_forward", "flash_general" },
+		muzzle,
+		1,
+		false
+	)
+end
+
+--------------------------------------------------------------------------------
+-- Shared: reload sequence (NEW METHOD)
+-- Generic reload state machine. Subclass calls with animation names.
+-- onLoopCallback(ammoLoaded) called after each loop iteration to do custom logic.
+--------------------------------------------------------------------------------
+
+function BaseTool:_reloadSequence(
+	startAnimName: string,
+	loopAnimName: string,
+	endAnimName: string,
+	onLoopCallback: ((number) -> ())?,
+	maxAmmo: number,
+	currentAmmo: number
+): boolean
+	if self.Reloading then return false end
+	if currentAmmo >= maxAmmo then return false end
+
+	self:_stopAllExcept()
+	self.Reloading = true
+	self._reloadCancelled = false
+
+	local anims = self.RegisteredAnimations
+	if not anims then
+		self.Reloading = false
+		return false
+	end
+
+	-- Start animation
+	if startAnimName and anims[startAnimName] then
+		self:_playAnim(startAnimName).Stopped:Wait()
+	end
+
+	-- Loop animation until full or cancelled
+	while currentAmmo < maxAmmo and not self._reloadCancelled do
+		if loopAnimName and anims[loopAnimName] then
+			self:_playAnim(loopAnimName).Stopped:Wait()
+		end
+		if self._reloadCancelled then break end
+
+		currentAmmo += 1
+		if onLoopCallback then
+			onLoopCallback(currentAmmo)
+		end
+	end
+
+	-- End animation
+	if not self._reloadCancelled then
+		if endAnimName and anims[endAnimName] then
+			self:_playAnim(endAnimName).Stopped:Wait()
+		end
+	else
+		-- Cancel: stop all reload animations
+		local stopNames = { startAnimName, loopAnimName, endAnimName }
+		for _, name in ipairs(stopNames) do
+			if name and anims[name] and anims[name].IsPlaying then
+				anims[name]:Stop(CUT)
+			end
+		end
+	end
+
+	self.Reloading = false
+	self._reloadCancelled = false
+	self:_restoreBaseDeferred()
+
+	return true
+end
+
+--------------------------------------------------------------------------------
 -- Shared: replication
 --------------------------------------------------------------------------------
 
@@ -831,7 +1141,11 @@ end
 function BaseTool:ammo_check()
 	if not self.RegisteredAnimations or not self.RegisteredAnimations.Check then return end
 	if self:_isBusy() then return end
+	if self.Checking == true then return end
+	if self.Check_Delayed == true then return end
 
+	self.Checking = true
+	self.Check_Delayed = true
 	local ammo_check_part, ammo_check_utils
 	if not workspace.CurrentCamera:FindFirstChild("Ammo_Check") then
 		ammo_check_part  = game.ReplicatedStorage.Shared.Assets.Guns.Effects.AmmoUI.Ammo_Check:Clone()
@@ -846,6 +1160,7 @@ function BaseTool:ammo_check()
 	self.RegisteredAnimations.Check:Play()
 	self.RegisteredAnimations.Check.Stopped:Wait()
 
+	self.Checking = false
 	local hrp = LOCAL_PLAYER.Character.HumanoidRootPart
 	ammo_check_part.Position = hrp.Position + hrp.CFrame.RightVector * 2 + Vector3.new(0, 1.5, 0)
 
@@ -858,6 +1173,19 @@ function BaseTool:ammo_check()
 	ammo_check_utils.utils(self.Ammo_Type, pct, false)
 
 	self:_restoreBase()
+
+	if self.Check_Delayed and self.Check_Delay then
+		task.delay(self.Check_Delay, function()
+			self.Check_Delayed = false
+		end)
+	end
+end
+
+
+function BaseTool:drop()
+	print("Emergency dropping...")
+	drop_connection:FireServer(self.className, self.model_reference, true)
+	self:destroy()
 end
 
 --------------------------------------------------------------------------------
@@ -925,7 +1253,7 @@ end
 --------------------------------------------------------------------------------
 
 function BaseTool:activate()
-	
+
 end
 
 function BaseTool:reload()
@@ -941,6 +1269,8 @@ function BaseTool:destroy()
 		self._activationConnection:Disconnect()
 		self._activationConnection = nil
 	end
+
+	self:_stopAllExcept()
 	self:_disconnectInput()
 	self:_stopShoulderTracking()
 	self:_stopAimTracking()
