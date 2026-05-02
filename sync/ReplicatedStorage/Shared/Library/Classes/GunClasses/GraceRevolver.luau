@@ -1,3 +1,4 @@
+--!strict
 --!native
 --!optimize 2
 
@@ -92,6 +93,7 @@ export type GraceRevolver = typeof(setmetatable({} :: {
 	Armor_Penetration_Level: number,
 	KnockBack_Force:         number,
 	Aiming_Number:           number,
+	MuzzlePartName:          string,
 
 	Aiming:    boolean,
 	Firing:    boolean,
@@ -174,6 +176,8 @@ function GraceRevolver.new(info: Types.BaseToolCreateInfo): GraceRevolver
 	self.Armor_Penetration_Level = 2
 	self.KnockBack_Force         = 8
 	self.Aiming_Number           = 80
+	self.MuzzlePartName          = "GraceRevolver_Muzzle"
+	self.Can_Drop                = true
 
 	self.unequip_wait     = false
 	self.Aiming           = false
@@ -182,21 +186,6 @@ function GraceRevolver.new(info: Types.BaseToolCreateInfo): GraceRevolver
 	self.Spinning         = false
 	self._reloadCancelled = false
 	self._spinCancelled   = false
-
-	self.Caster, self.CasterBehavior = Util.setupFastCast({
-		bulletTemplate  = FxFolder.Bullet,
-		bulletContainer = workspace.Game_Details.Effects.Bullets,
-		onHit           = function(cast, result, velocity)
-			local muzzle = self.actual_model and self.actual_model:FindFirstChild("GraceRevolver_Muzzle")
-			self:_onBulletHit(
-				cast, result, velocity,
-				muzzle,
-				self.Penetration_Level,
-				self.damage,
-				self.KnockBack_Force
-			)
-		end,
-	})
 
 	self:_initShoulderTracking()
 
@@ -209,7 +198,7 @@ end
 
 function GraceRevolver:_getKeyBindings()
 	local base = BaseTool._getKeyBindings(self)
-	base.Spin = Enum.KeyCode.F
+	base.Spin = Enum.KeyCode.Q
 	return base
 end
 
@@ -284,7 +273,7 @@ function GraceRevolver:fire()
 		return
 	end
 
-	local muzzle = self.actual_model and self.actual_model:FindFirstChild("GraceRevolver_Muzzle")
+	local muzzle = self.actual_model and self.actual_model:FindFirstChild(self.MuzzlePartName)
 	if not muzzle or self:_if_sprinting() then
 		self.Firing = false
 		return
@@ -308,16 +297,7 @@ function GraceRevolver:fire()
 		or  self:_playAnim("Fire_Left")
 
 	-- Muzzle flash
-	local muzzleEquipped = game.Players.LocalPlayer.Character
-		.CharacterData.Equipment.GraceRevolver.GraceRevolver_Muzzle
-	self:emit_effect(
-		FX_MUZZLE_FLASH,
-		muzzleEquipped.CFrame * CFrame.new(-0.1, 0, -2),
-		{ "smoke_medium", "smoke_forward", "flash_general" },
-		muzzleEquipped,
-		1,
-		false
-	)
+	self:_fireMuzzleFlash()
 
 	-- Restore after fire finishes (unless something else took over).
 	fireTrack.Stopped:Once(function()
@@ -364,7 +344,7 @@ end
 
 function GraceRevolver:activate()
 	if not self.actual_model then return end
-	if self.Firing or self.Reloading then return end
+	if self:_isBusy() then return end
 	if not self.Aiming then return end
 	task.spawn(function() self:fire() end)
 end
@@ -374,15 +354,33 @@ end
 --------------------------------------------------------------------------------
 
 function GraceRevolver:_on_equip()
+	-- FIX: Set Equipped BEFORE calling animations to prevent Hold from playing post-unequip
+	self.Equipped = true
+
 	self:_cacheMotor6D()
 	self:_connectInput()
 	self:_initShoulderTracking()
 	game.Players.LocalPlayer.Character:SetAttribute("Sprint_Animation", "GraceRevolver")
-	self:_playAnim("Hold")
+
+	-- Setup FastCast
+	self:_setupFastCast(FxFolder, function(cast, result, velocity)
+		local muzzle = self.actual_model and self.actual_model:FindFirstChild(self.MuzzlePartName)
+		self:_onBulletHit(
+			cast, result, velocity,
+			muzzle,
+			self.Penetration_Level,
+			self.damage,
+			self.KnockBack_Force
+		)
+	end)
+
+	-- Use _restoreBase instead of direct _playAnim to properly integrate with the animation layer system
+	self:_restoreBase()
 end
 
 function GraceRevolver:_on_unequip()
 	self._reloadCancelled = true
+	self.Equipped = false  -- Set before stopping animations
 
 	self:_disconnectInput()
 	self:_stopShoulderTracking()
