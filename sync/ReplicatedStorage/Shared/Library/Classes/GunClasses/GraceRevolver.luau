@@ -164,6 +164,8 @@ function GraceRevolver.new(info: Types.BaseToolCreateInfo): GraceRevolver
 		Check  = Anim_Folder.GraceRevolver_Check,
 		Melee1 = Anim_Folder.GraceRevolver_Melee1,
 		Melee2 = Anim_Folder.GraceRevolver_Melee2,
+		
+		Drop = Anim_Folder.Parent.Parent.Misc.Drop_Pistol
 	}
 
 	self.damage                  = 25
