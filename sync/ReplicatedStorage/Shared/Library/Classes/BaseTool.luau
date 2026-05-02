@@ -248,7 +248,7 @@ function BaseTool:equip()
 			if self.Aiming then
 				local aimTrack = self:_aimTrack()
 				if aimTrack and not aimTrack.IsPlaying then
-					aimTrack:Play(0.3)
+					aimTrack:Play(CUT)
 				end
 				return
 			end
@@ -364,7 +364,7 @@ function BaseTool:_playAnim(name: string): AnimationTrack?
 		end
 	end
 
-	track:Play(0.3)
+	track:Play(CUT)
 	return track
 end
 
@@ -516,7 +516,7 @@ function BaseTool:aim()
 	self:_killAimTracks()
 	if anims.Hold and anims.Hold.IsPlaying then anims.Hold:Stop(CUT) end
 	local aimTrack = self:_aimTrack()
-	if aimTrack then aimTrack:Play(0.3) end
+	if aimTrack then aimTrack:Play(CUT) end
 	local char = LOCAL_PLAYER.Character
 	if char then char:SetAttribute("Aiming", true) end
 
@@ -543,7 +543,7 @@ function BaseTool:endAiming()
 		self:_killAimTracks()
 		if not self:_isBusy() then
 			if anims.Hold and not anims.Hold.IsPlaying then
-				anims.Hold:Play(0.3)
+				anims.Hold:Play(CUT)
 			end
 		end
 	end
