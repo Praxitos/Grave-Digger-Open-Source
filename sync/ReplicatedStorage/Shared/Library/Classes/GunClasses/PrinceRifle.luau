@@ -168,6 +168,8 @@ function PrinceRifle.new(info: Types.BaseToolCreateInfo): PrinceRifle
 
 		Melee1 = AnimFolder.PrinceRifle_Melee1,
 		Melee2 = AnimFolder.PrinceRifle_Melee2,
+		
+		Drop = AnimFolder.Parent.Parent.Misc.Drop_Rifle
 	}
 
 	self.damage                  = 105
