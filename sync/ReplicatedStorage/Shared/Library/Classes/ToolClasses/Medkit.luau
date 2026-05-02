@@ -37,6 +37,7 @@ function Medkit.new(info: { name: string }): Medkit
 
 	self.Healing = false
 	self.HoldingM1 = false
+	self.Aiming = false
 	self.locked_in = false
 
 	self.original_walkspeed = nil
@@ -63,6 +64,7 @@ function Medkit.new(info: { name: string }): Medkit
 		Hold    = Animations_Folder.Medkit_Held,
 		Unequip = Animations_Folder.Medkit_Unequip,
 		Check   = Animations_Folder["Medkit HealthCheck"],
+		Special_Aim = Animations_Folder["Medkit Aim"],
 
 		LeftArm_Suture = Animations_Folder["Left Arm Suture"],
 		LeftArm_Tweezer = Animations_Folder["Left Arm Tweezer"],
@@ -75,6 +77,8 @@ function Medkit.new(info: { name: string }): Medkit
 		Torso_Suture  = Animations_Folder["Torso Suture"],
 
 		AfterHeal_Water = Animations_Folder["AfterHeal Water"],
+		Suture_Others = Animations_Folder["Suture Others"],
+		Tweezer_Others = Animations_Folder["Tweezer Others"],
 	}
 
 	return self
@@ -88,8 +92,18 @@ local function split_string(str: string, sep: string): {string}
 	return result
 end
 
-function Medkit:_get_animation(origin: string, step: string)
+function Medkit:_get_animation(origin: string, step: string, isOther: boolean?)
 	local anims = self.RegisteredAnimations
+
+	-- FORCE "others" animations when healing another player
+	if isOther then
+		if step == "Suture" then
+			return anims.Suture_Others
+		elseif step == "Tweezer" then
+			return anims.Tweezer_Others
+		end
+	end
+
 	local normalized_origin = string.gsub(origin, "%s+", "")
 	local key = normalized_origin .. "_" .. step
 
@@ -100,7 +114,34 @@ function Medkit:_get_animation(origin: string, step: string)
 	return anims["Torso_" .. step]
 end
 
-function Medkit:_play_heal_sequence(wound_value: StringValue, is_last_wound: boolean)
+function Medkit:_raycast_target()
+	local camera = workspace.CurrentCamera
+	local rayOrigin = camera.CFrame.Position
+	local rayDirection = camera.CFrame.LookVector * 500
+
+	local raycastParams = RaycastParams.new()
+	raycastParams.FilterType = Enum.RaycastFilterType.Exclude
+	raycastParams.FilterDescendantsInstances = {self.Character}
+
+	local rayResult = workspace:Raycast(rayOrigin, rayDirection, raycastParams)
+
+	if rayResult then
+		local hitPart = rayResult.Instance
+		local hitCharacter = hitPart.Parent
+
+		if hitCharacter and hitCharacter:FindFirstChildOfClass("Humanoid") then
+			local distance = (self.Character.HumanoidRootPart.Position - hitCharacter.HumanoidRootPart.Position).Magnitude
+			if distance <= 6 then 
+				print("[MEDKIT] Target detected:", hitCharacter.Name)
+				return hitCharacter
+			end
+		end
+	end
+
+	return nil
+end
+
+function Medkit:_play_heal_sequence(wound_value: StringValue, is_last_wound: boolean, target: Model?)
 	local data = split_string(wound_value.Value, ",")
 	if #data < 3 then return false end
 
@@ -110,10 +151,11 @@ function Medkit:_play_heal_sequence(wound_value: StringValue, is_last_wound: boo
 
 	local fired_concussion = false
 	local is_leg_wound = string.find(origin, "Leg") ~= nil
-
 	local humanoid = self.Character:FindFirstChildOfClass("Humanoid")
 
 	local function set_leg_slow()
+		if target then return end
+
 		if is_leg_wound and humanoid then
 			if self.original_walkspeed == nil then
 				self.original_walkspeed = humanoid.WalkSpeed
@@ -123,6 +165,8 @@ function Medkit:_play_heal_sequence(wound_value: StringValue, is_last_wound: boo
 	end
 
 	local function restore_speed()
+		if target then return end
+
 		if humanoid and self.original_walkspeed ~= nil then
 			humanoid.WalkSpeed = self.original_walkspeed
 		end
@@ -130,38 +174,52 @@ function Medkit:_play_heal_sequence(wound_value: StringValue, is_last_wound: boo
 
 	local function can_cancel()
 		local elapsed = tick() - startTime
+		if target then return false end -- Surgery on others is committed
 		return elapsed < 2.5
 	end
 
-	-- apply slow immediately for leg wounds
-	set_leg_slow()
+	if not target then
+		set_leg_slow()
+		local pre = anims.AfterHeal_Water
+		pre:Play()
 
-	local pre = anims.AfterHeal_Water
-	pre:Play()
-
-	while pre.IsPlaying do
-		if can_cancel() and (not self.HoldingM1 or not self.Equipped) then
-			pre:Stop()
-			restore_speed()
-			return false
+		while pre.IsPlaying do
+			if can_cancel() and (not self.HoldingM1 or not self.Equipped) then
+				print("[MEDKIT] Self-Heal cancelled during prep.")
+				pre:Stop()
+				restore_speed()
+				return false
+			end
+			task.wait()
 		end
-		task.wait()
 	end
 
 	for i = 3, #data do
 		local elapsed = tick() - startTime
 
-		if elapsed >= 2.5 and not self.Character:GetAttribute("Tool_Locked") then
-			self.Character:SetAttribute("Tool_Locked", true)
+		if not target then
+			if elapsed >= 2.5 and not self.Character:GetAttribute("Tool_Locked") then
+				self.Character:SetAttribute("Tool_Locked", true)
+			end
 		end
 
 		if can_cancel() and (not self.HoldingM1 or not self.Equipped) then
+			print("[MEDKIT] Surgery cancelled mid-sequence.")
 			restore_speed()
 			return false
 		end
 
+		if target then
+			local distance = (self.Character.HumanoidRootPart.Position - target.HumanoidRootPart.Position).Magnitude
+			if distance > 6 or not target:FindFirstChildOfClass("Humanoid") or target.Humanoid.Health <= 0 then
+				print("[MEDKIT] Sequence failed: Patient lost or out of range.")
+				restore_speed()
+				return false
+			end
+		end
+
 		local step = data[i]
-		local track: AnimationTrack = self:_get_animation(origin, step)
+		local track: AnimationTrack = self:_get_animation(origin, step, target ~= nil)
 		if not track then continue end
 
 		local connection
@@ -203,7 +261,6 @@ function Medkit:_play_heal_sequence(wound_value: StringValue, is_last_wound: boo
 	end
 
 	restore_speed()
-
 	if is_last_wound and not fired_concussion then
 		Status_RemoteEvent:FireServer("ConcussionStatus")
 	end
@@ -211,18 +268,24 @@ function Medkit:_play_heal_sequence(wound_value: StringValue, is_last_wound: boo
 	return true
 end
 
-function Medkit:_perform_surgery(wound: StringValue)
+function Medkit:_perform_surgery(wound: StringValue, target: Model?)
 	if self.Healing then return false end
-	self.Healing = true
 
+	self.Healing = true
 	self.Character:SetAttribute("SprintBlocked", true)
 
-	local is_last_wound = (#self.Wounds_folder:GetChildren() == 1)
+	local target_wounds = target and target:FindFirstChild("CharacterData") and target.CharacterData:FindFirstChild("Wounds") or self.Wounds_folder
+	local is_last_wound = (#target_wounds:GetChildren() == 1)
 
-	local success = self:_play_heal_sequence(wound, is_last_wound)
+	print("[MEDKIT] Starting Surgery. Target:", target and target.Name or "Self", "| Wound:", wound.Name)
+
+	local success = self:_play_heal_sequence(wound, is_last_wound, target)
 
 	if success then
-		Heal_RemoteEvent:FireServer(local_player, wound)
+		print("[MEDKIT] Surgery Complete. Firing Remote.")
+		Heal_RemoteEvent:FireServer(target or local_player, wound)
+	else
+		print("[MEDKIT] Surgery Failed.")
 	end
 
 	self.Character:SetAttribute("SprintBlocked", nil)
@@ -232,61 +295,110 @@ function Medkit:_perform_surgery(wound: StringValue)
 	return success
 end
 
-function Medkit:ammo_check()
-	print("Using medkit_check")
-
-	local health = self.Character.Humanoid.Health
-	local max_health = self.Character.Humanoid.MaxHealth
-	local humanoid_percentage = health / max_health
-
-	self.RegisteredAnimations.Check:Play()
-	self.RegisteredAnimations.Check.Stopped:Wait()
-
-	if health >= 200 then
-		self:notify("I'm all good." )
-		return
-	elseif health >= 100 then
-		self:notify("I'm fine, just slightly in pain")
-		return
-	elseif health < 100 then
-		if health > 50 then
-			self:notify("I'm injured and need Surgery")
-			return
-		else
-			self:notify("I'm heavily wounded, I really need Surgery")
-			return
-		end
+function Medkit:_process_self_heal()
+	if self.Character.Humanoid.Health >= 100 then
+		print("[MEDKIT] Self-Heal aborted: Health full.")
+		return false
 	end
+
+	local wounds = self.Wounds_folder:GetChildren()
+	if #wounds == 0 then
+		print("[MEDKIT] Self-Heal aborted: No wounds.")
+		if self.Equipped then
+			self:notify("I'm not hurt enough to need Surgery")
+		end
+		return false
+	end
+
+	local wound = wounds[math.random(1, #wounds)]
+	return self:_perform_surgery(wound)
 end
 
-function Medkit:_begin_heal_loop()
-	if self.Healing then return end
+function Medkit:_process_target_heal(target: Model)
+	local humanoid = target:FindFirstChildOfClass("Humanoid")
+	if not humanoid or humanoid.Health <= 0 then
+		print("[MEDKIT] Target-Heal aborted: Target invalid or dead.")
+		return false
+	end
+
+	local distance = (self.Character.HumanoidRootPart.Position - target.HumanoidRootPart.Position).Magnitude
+	if distance > 6 then
+		print("[MEDKIT] Target-Heal aborted: Target too far ("..math.floor(distance).." studs).")
+		self:notify("Patient is too far away")
+		return false
+	end
+
+	local target_data = target:FindFirstChild("CharacterData")
+	local target_wounds = target_data and target_data:FindFirstChild("Wounds")
+
+	if not target_wounds or #target_wounds:GetChildren() == 0 then
+		print("[MEDKIT] Target-Heal aborted: Target has no wounds.")
+		self:notify("Patient does not need Surgery")
+		return false
+	end
+
+	local wounds = target_wounds:GetChildren()
+	local wound = wounds[math.random(1, #wounds)]
+
+	return self:_perform_surgery(wound, target)
+end
+
+function Medkit:_begin_heal_loop(target: Model?)
+	if self.Healing then 
+		print("[MEDKIT] Loop blocked: Already healing.")
+		return 
+	end
 
 	self._healLoopConnection = task.spawn(function()
-		local notified = false
+		print("[MEDKIT] Starting heal loop.")
+		while self.HoldingM1 and self.Equipped do
+			local success = false
 
-		while self.HoldingM1 and self.Equipped and self.Character.Humanoid.Health < 100 do
-			local wounds = self.Wounds_folder:GetChildren()
-
-			if #wounds == 0 and self.Equipped and not notified then
-				self:notify("I'm not hurt enough to need Surgery")
-				notified = true
-				break
+			if target and self.Aiming then
+				success = self:_process_target_heal(target)
+			else
+				success = self:_process_self_heal()
 			end
 
-			local wound = wounds[math.random(1, #wounds)]
-
-			local success = self:_perform_surgery(wound)
-			if not success then
-				break
+			if not success then 
+				print("[MEDKIT] Loop ending: Process returned false.")
+				break 
 			end
 
 			task.wait(0.1)
 		end
+		print("[MEDKIT] Heal loop terminated.")
 	end)
 end
 
+function Medkit:ammo_check()
+	print("[MEDKIT] Performing Health Check animation.")
+	local health = self.Character.Humanoid.Health
+	self.RegisteredAnimations.Check:Play()
+	self.RegisteredAnimations.Check.Stopped:Wait()
+
+	if health >= 200 then
+		self:notify("I'm all good.")
+	elseif health >= 100 then
+		self:notify("I'm fine, just slightly in pain")
+	elseif health > 50 then
+		self:notify("I'm injured and need Surgery")
+	else
+		self:notify("I'm heavily wounded, I really need Surgery")
+	end
+end
+
+function Medkit:_update_aim_animation()
+	local aimTrack = self.RegisteredAnimations.Special_Aim
+	if self.Aiming then
+		if not aimTrack.IsPlaying then aimTrack:Play() end
+	else
+		if aimTrack.IsPlaying then aimTrack:Stop() end
+	end
+end
+
 function Medkit:_on_equip()
+	print("[MEDKIT] Equipped.")
 	self.Equipped = true
 	self:_connectInput()
 
@@ -294,20 +406,29 @@ function Medkit:_on_equip()
 		if gpe then return end
 		if input.UserInputType == Enum.UserInputType.MouseButton1 then
 			self.HoldingM1 = true
-			self:_begin_heal_loop()
+			local target = self:_raycast_target()
+			self:_begin_heal_loop(target)
+		elseif input.UserInputType == Enum.UserInputType.MouseButton2 then
+			self.Aiming = true
+			self:_update_aim_animation()
 		end
 	end)
 
 	self._inputEnded = UserInputService.InputEnded:Connect(function(input)
 		if input.UserInputType == Enum.UserInputType.MouseButton1 then
 			self.HoldingM1 = false
+		elseif input.UserInputType == Enum.UserInputType.MouseButton2 then
+			self.Aiming = false
+			self:_update_aim_animation()
 		end
 	end)
 end
 
 function Medkit:_on_unequip()
+	print("[MEDKIT] Unequipped.")
 	self.Equipped = false
 	self.HoldingM1 = false
+	self.Aiming = false
 	self.Healing = false
 
 	self:_disconnectInput()
@@ -325,7 +446,10 @@ function Medkit:_on_unequip()
 		self._healLoopConnection = nil
 	end
 
-	-- safety restore
+	if self.RegisteredAnimations.Special_Aim.IsPlaying then
+		self.RegisteredAnimations.Special_Aim:Stop()
+	end
+
 	local humanoid = self.Character and self.Character:FindFirstChildOfClass("Humanoid")
 	if humanoid and self.original_walkspeed then
 		humanoid.WalkSpeed = self.original_walkspeed
